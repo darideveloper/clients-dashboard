@@ -22,11 +22,19 @@ TBD - created by archiving change init-django-clients-project. Update Purpose af
 - **THEN** it returns `["Development", "info"]`
 
 ### Requirement: Unfolded auth admin
-`project/admin.py` SHALL unregister Django's default `User` and `Group` admins and re-register them using `unfold.admin.ModelAdmin` mixed with `BaseUserAdmin` / `BaseGroupAdmin`. `User` admin SHALL use `unfold.forms.UserChangeForm`, `unfold.forms.UserCreationForm`, and `unfold.forms.AdminPasswordChangeForm`.
+`core/admin.py` SHALL unregister Django's default `User` and `Group` admins and re-register them using `project.admin_base.ModelAdminUnfoldBase` (which extends `unfold.admin.ModelAdmin`) mixed with `BaseUserAdmin` / `BaseGroupAdmin`. The `User` admin SHALL use `unfold.forms.UserChangeForm`, `unfold.forms.UserCreationForm`, and `unfold.forms.AdminPasswordChangeForm`. The `Group` admin SHALL NOT override forms. The registration SHALL live in `core/admin.py` (not `project/admin.py`) because `core` is in `INSTALLED_APPS` and `project` is not. See the `unfold-auth-admin-registration` capability for the full registration contract.
 
 #### Scenario: User form uses Unfold
 - **WHEN** an admin opens the user change form at `/admin/auth/user/<id>/change/`
-- **THEN** the form is rendered with Unfold's `UserChangeForm` styling
+- **THEN** the form is rendered with Unfold's `UserChangeForm` styling.
+
+#### Scenario: Group form uses Unfold
+- **WHEN** an admin opens the group change form at `/admin/auth/group/<id>/change/`
+- **THEN** the form is rendered with the Unfold theme (no Django classic admin markup in the form area) and `ModelAdminUnfoldBase` enhancements (row action, compressed fields, warn-unsaved, cancel button) are present.
+
+#### Scenario: Auth admin registration lives in core
+- **WHEN** Django starts and `core/apps.py` is loaded
+- **THEN** `core/admin.py` is imported and the Unfold `User`/`Group` admins are registered; `project/admin.py` is not loaded (it is not in `INSTALLED_APPS`).
 
 ### Requirement: Admin template override
 `project/templates/admin/base_site.html` SHALL extend `admin/base.html` (NOT `unfold/layouts/base.html` — extending the internal layout breaks Unfold's sticky bottom bar and responsive grid; this contradicts the `django-project-setup` doc which shows `unfold/layouts/base.html`, but `django-unfold-admin` doc §8 is the canonical guidance). The template SHALL load `simplemde.min.css`, `simplemde.min.js` from the SimpleMDE CDN, the local `static/css/style.css`, and the local JS files `add_tailwind_styles.js`, `load_markdown.js`, and `range_date_filter_es.js`.
@@ -55,4 +63,15 @@ The repo SHALL include `static/css/style.css` with markdown preview typography r
 #### Scenario: Range date filter localized
 - **WHEN** the admin renders a list filter for `created_at`
 - **THEN** the `created_at_from` input's `placeholder` attribute is `Desde` and `created_at_to` is `Hasta`
+
+### Requirement: Authentication sidebar exposes Users and Groups
+`UNFOLD["SIDEBAR"]["navigation"]` SHALL include a section titled `Authentication` (or its translated equivalent) whose `items` list contains both a `Users` entry linking to `admin:auth_user_changelist` and a `Groups` entry linking to `admin:auth_group_changelist`. The section SHALL be `collapsible=False` so the entries are visible without interaction. Because `UNFOLD["SIDEBAR"]["show_all_applications"]` is `False`, the manual `items` list is the sole source of auth-related nav links.
+
+#### Scenario: Groups is reachable from the sidebar
+- **WHEN** a superuser renders any admin page
+- **THEN** the sidebar shows a `Groups` link under the `Authentication` section, the link's `href` resolves to `/admin/auth/group/`, and clicking it loads the Unfold-styled Group changelist.
+
+#### Scenario: Users link is unchanged
+- **WHEN** a superuser renders any admin page
+- **THEN** the `Users` link under the `Authentication` section is still present and still resolves to `/admin/auth/user/`.
 
