@@ -7,6 +7,8 @@ from django.templatetags.static import static
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
 
+from utils.callbacks import site_icon
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load .env first to get ENV value
@@ -78,6 +80,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "utils.context_processors.user_palette",
             ],
         },
     },
@@ -208,8 +211,7 @@ UNFOLD = {
     "SITE_HEADER": "clients Admin",
     "SITE_SUBHEADER": "clients Dashboard",
     "SITE_URL": "/",
-    "SITE_ICON": lambda request: static("favicon.png"),
-    "SITE_LOGO": lambda request: static("logo.webp"),
+    "SITE_ICON": lambda request: site_icon(request),
     "SITE_SYMBOL": "directions_car",
     "SITE_FAVICONS": [
         {

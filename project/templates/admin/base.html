@@ -13,3 +13,12 @@
 <script src="{% static 'js/load_markdown.js' %}"></script>
 <script src="{% static 'js/range_date_filter_es.js' %}"></script>
 {% endblock %}
+
+{% block base %}
+{{ block.super }}
+{% if user_palette_css %}
+<style id="user-palette">
+{{ user_palette_css|safe }}
+</style>
+{% endif %}
+{% endblock %}
