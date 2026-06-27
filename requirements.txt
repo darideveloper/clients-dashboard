@@ -1,0 +1,30 @@
+# base
+Django>=5.2,<5.3           # Core web framework
+whitenoise>=6.11.0          # Static file serving for production
+gunicorn>=24.1.1           # Production WSGI server
+django-cors-headers>=4.9.0 # CORS handling for API access
+python-dotenv>=1.0.1      # Environment variable management
+
+# db
+psycopg[binary]>=3.2.3     # PostgreSQL database adapter
+
+# images
+pillow>=11.1.0             # Image processing library
+
+# drf & jwt
+djangorestframework>=3.16.1 # REST API toolkit
+django-filter>=24.3        # Dynamic API filtering
+
+# testing
+selenium>=4.40.0           # Browser automation for E2E tests
+
+# admin
+django-unfold==0.77.1      # Modern Django admin theme
+django-solo>=2.3.0         # Singleton models for configuration
+
+# tools
+requests>=2.32.3           # HTTP library for external API calls
+
+# storage
+django-storages==1.14.4    # Custom storage backends (S3, etc.)
+boto3==1.34.162            # AWS SDK for Python
