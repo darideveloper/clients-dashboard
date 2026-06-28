@@ -4,8 +4,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from django.templatetags.static import static
-from django.urls import reverse_lazy
-from django.utils.translation import gettext_lazy as _
 
 from utils.callbacks import site_icon
 
@@ -82,6 +80,9 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "utils.context_processors.user_palette",
             ],
+            "libraries": {
+                "sidebar_extras": "utils.templatetags.sidebar_extras",
+            },
         },
     },
 ]
@@ -242,31 +243,8 @@ UNFOLD = {
     },
     "SIDEBAR": {
         "show_search": True,
-        "show_all_applications": False,
-        "navigation": [
-            {
-                "title": _("Authentication"),
-                "separator": True,
-                "collapsible": False,
-                "items": [
-                    {
-                        "title": _("Users"),
-                        "icon": "person",
-                        "link": reverse_lazy("admin:auth_user_changelist"),
-                    },
-                    {
-                        "title": _("Groups"),
-                        "icon": "group",
-                        "link": reverse_lazy("admin:auth_group_changelist"),
-                    },
-                ],
-            },
-            {
-                "title": _("Core"),
-                "separator": True,
-                "collapsible": True,
-                "items": [],
-            },
-        ],
+        "show_all_applications": True,
+        "navigation": [],
+
     },
 }

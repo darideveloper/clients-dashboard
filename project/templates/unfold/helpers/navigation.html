@@ -1,0 +1,52 @@
+{% load i18n unfold sidebar_extras %}
+
+<nav id="nav-sidebar-inner" class="bg-base-50 flex flex-col min-h-screen dark:text-font-default-dark dark:bg-base-950/20 {% element_classes 'navigation_inner' %}">
+    {% include "unfold/helpers/navigation_header.html" %}
+
+    {% include "unfold/helpers/search.html" %}
+
+    <div id="nav-sidebar-apps" class="h-0 grow overflow-auto" data-simplebar>
+        {% for app in available_apps %}
+            {% if app.models %}
+                <div class="hidden mb-1.5 has-[ol]:has-[li]:block" x-data="{navigationOpen: true}">
+                    {% if not forloop.first %}
+                        <hr class="border-t border-base-200 mx-6 my-2 dark:border-base-800" />
+                    {% endif %}
+
+                    <h2 class="font-semibold flex flex-row group items-center mb-1 mx-3 py-1.5 px-3 select-none text-font-important-light text-sm dark:text-font-important-dark cursor-pointer hover:text-primary-600 dark:hover:text-primary-500" x-on:click="navigationOpen = !navigationOpen">
+                        {{ app.name }}
+
+                        <span class="material-symbols-outlined ml-auto transition-all group-hover:text-primary-600 dark:group-hover:text-primary-500" x-bind:class="{'rotate-90': navigationOpen}">
+                            chevron_right
+                        </span>
+                    </h2>
+
+                    <ol class="flex flex-col gap-0.5 px-6" x-show="navigationOpen">
+                        {% for model in app.models %}
+                            {% if model.admin_url %}
+                                {% with model_key=app.app_label|add:"."|add:model.object_name|lower %}
+                                <li>
+                                    <a href="{{ model.admin_url }}" class="flex h-[38px] items-center -mx-3 px-3 rounded-default hover:text-primary-600 dark:hover:text-primary-500 {% if model.admin_url in request.path %}bg-base-100 font-semibold text-primary-600 dark:bg-white/[.06] dark:text-primary-500 active{% endif %}">
+                                        <span class="material-symbols-outlined md-18 mr-3 w-[18px]">
+                                            {{ sidebar_icons|get_item:model_key|default:"database" }}
+                                        </span>
+
+                                        <span>{{ model.name }}</span>
+                                    </a>
+                                </li>
+                                {% endwith %}
+                            {% endif %}
+                        {% endfor %}
+                    </ol>
+                </div>
+            {% endif %}
+        {% empty %}
+            <div class="px-6 py-3">
+                {% trans "You don't have permission to view or edit anything." as error_message %}
+                {% include "unfold/helpers/messages/error.html" with error=error_message %}
+            </div>
+        {% endfor %}
+    </div>
+
+    {% include "unfold/helpers/navigation_user.html" %}
+</nav>

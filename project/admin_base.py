@@ -5,6 +5,7 @@ from unfold.decorators import action
 
 
 class ModelAdminUnfoldBase(ModelAdmin):
+    sidebar_icon = "database"
     compressed_fields = True
     warn_unsaved_form = True
     list_filter_sheet = False
