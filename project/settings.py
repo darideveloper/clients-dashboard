@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from django.templatetags.static import static
 
-from utils.callbacks import site_icon
+from utils.callbacks import site_favicon, site_icon
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -219,7 +219,7 @@ UNFOLD = {
             "rel": "icon",
             "sizes": "32x32",
             "type": "image/png",
-            "href": lambda request: static("favicon.png"),
+            "href": lambda request: site_favicon(request),
         },
     ],
     "SHOW_HISTORY": True,

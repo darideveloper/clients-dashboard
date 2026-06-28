@@ -26,6 +26,16 @@ def site_icon(request):
     return static("favicon.png")
 
 
+def site_favicon(request):
+    user = getattr(request, "user", None)
+    brand = getattr(user, "brand", None) if user and user.is_authenticated else None
+    if brand and brand.has_logo:
+        url = brand.favicon_url
+        if url:
+            return url
+    return static("favicon.png")
+
+
 # (shade, L, C) mirrors UNFOLD["COLORS"]["primary"] in project/settings.py.
 # 50..950 in steps of 100 (and 950). H is preserved from the source color
 # via `oklch(from <color> L C h)` at render time.

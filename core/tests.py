@@ -11,7 +11,7 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from core.models import Brand, Membership
-from utils.callbacks import primary_palette_css, site_icon
+from utils.callbacks import primary_palette_css, site_favicon, site_icon
 
 
 class BrandModelTests(TestCase):
@@ -206,10 +206,7 @@ class SiteIconCallbackTests(TestCase):
 
     def test_authenticated_brand_with_logo_returns_logo_url(self):
         Membership.objects.create(user=self.user, brand=self.brand)
-        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        tmp.write(b"fake")
-        tmp.close()
-        self.brand.logo.save("logo.png", SimpleUploadedFile("logo.png", b"fake"), save=True)
+        self.brand.logo.save("logo.png", _make_test_image(), save=True)
         try:
             request = self.factory.get("/")
             request.user = self.user
@@ -218,6 +215,188 @@ class SiteIconCallbackTests(TestCase):
         finally:
             if self.brand.logo:
                 self.brand.logo.delete(save=False)
+
+
+def _make_test_image(width=100, height=100, color=(255, 0, 0)):
+    from io import BytesIO
+    from PIL import Image
+    img = Image.new("RGB", (width, height), color)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return SimpleUploadedFile("test.png", buf.read(), content_type="image/png")
+
+
+class SiteFaviconCallbackTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username="u", email="u@x.test")
+        self.brand = Brand.objects.create(name="B")
+        self._static_patcher = mock.patch(
+            "utils.callbacks.static", return_value="/static/favicon.png"
+        )
+        self._static_patcher.start()
+
+    def tearDown(self):
+        self._static_patcher.stop()
+
+    def test_unauthenticated_returns_favicon(self):
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        self.assertIn("favicon", site_favicon(request))
+
+    def test_authenticated_no_brand_returns_favicon(self):
+        request = self.factory.get("/")
+        request.user = self.user
+        self.assertIn("favicon", site_favicon(request))
+
+    def test_authenticated_brand_no_logo_returns_favicon(self):
+        Membership.objects.create(user=self.user, brand=self.brand)
+        request = self.factory.get("/")
+        request.user = self.user
+        self.assertIn("favicon", site_favicon(request))
+
+    def test_authenticated_brand_with_logo_returns_favicon_url(self):
+        Membership.objects.create(user=self.user, brand=self.brand)
+        self.brand.logo.save("logo.png", _make_test_image(), save=True)
+        try:
+            request = self.factory.get("/")
+            request.user = self.user
+            url = site_favicon(request)
+            self.assertNotIn("/static/", url)
+            self.assertIn("favicon.png", url)
+        finally:
+            if self.brand.logo:
+                self.brand.logo.delete(save=False)
+
+
+class BrandFaviconGenerationTests(TestCase):
+    def test_generated_on_logo_upload(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(), save=True)
+        try:
+            storage = brand.logo.storage
+            path = f"brands/brand_{brand.pk}/favicon.png"
+            self.assertTrue(storage.exists(path), "favicon should exist after logo upload")
+        finally:
+            if brand.logo:
+                brand.logo.delete(save=False)
+
+    def test_regenerated_on_logo_replace(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(50, 50), save=True)
+        path = f"brands/brand_{brand.pk}/favicon.png"
+        storage = brand.logo.storage
+        self.assertTrue(storage.exists(path))
+        old_url = brand.favicon_url
+        brand.logo.save("logo.png", _make_test_image(200, 200), save=True)
+        try:
+            self.assertTrue(storage.exists(path), "favicon should exist after replace")
+            self.assertEqual(brand.favicon_url, old_url,
+                             "URL path should be the same (file overwritten, not suffixed)")
+        finally:
+            if brand.logo:
+                brand.logo.delete(save=False)
+
+    def test_deleted_on_logo_removed(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(), save=True)
+        path = f"brands/brand_{brand.pk}/favicon.png"
+        storage = brand.logo.storage
+        self.assertTrue(storage.exists(path))
+        brand.logo.delete(save=False)
+        brand.save()
+        self.assertFalse(storage.exists(path), "favicon should be deleted when logo is removed")
+
+    def test_deleted_on_brand_delete(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(), save=True)
+        path = f"brands/brand_{brand.pk}/favicon.png"
+        brand.delete()
+        storage = brand.logo.storage if hasattr(brand, 'logo') and brand.logo else None
+        if storage:
+            self.assertFalse(storage.exists(path), "favicon should be deleted when brand is deleted")
+
+    def test_no_logo_no_favicon(self):
+        brand = Brand.objects.create(name="NoLogo")
+        self.assertIsNone(brand.favicon_url)
+
+    def test_unsaved_brand_favicon_url_none(self):
+        brand = Brand(name="Unsaved")
+        self.assertIsNone(brand.favicon_url)
+
+
+class BrandFaviconImageTests(TestCase):
+    def test_output_is_32x32_png(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(200, 200), save=True)
+        try:
+            storage = brand.logo.storage
+            path = f"brands/brand_{brand.pk}/favicon.png"
+            from PIL import Image as PilImage
+            with storage.open(path) as f:
+                img = PilImage.open(f)
+                self.assertEqual(img.size, (32, 32))
+                self.assertEqual(img.format, "PNG")
+        finally:
+            if brand.logo:
+                brand.logo.delete(save=False)
+
+    def test_center_cropped_from_non_square(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(200, 100), save=True)
+        try:
+            storage = brand.logo.storage
+            path = f"brands/brand_{brand.pk}/favicon.png"
+            from PIL import Image as PilImage
+            with storage.open(path) as f:
+                img = PilImage.open(f)
+                self.assertEqual(img.size, (32, 32))
+        finally:
+            if brand.logo:
+                brand.logo.delete(save=False)
+
+    def test_uses_lanczos_resampling(self):
+        brand = Brand.objects.create(name="B")
+        brand.logo.save("logo.png", _make_test_image(200, 200), save=True)
+        try:
+            storage = brand.logo.storage
+            path = f"brands/brand_{brand.pk}/favicon.png"
+            from PIL import Image as PilImage
+            with storage.open(path) as f:
+                img = PilImage.open(f)
+                self.assertEqual(img.size, (32, 32))
+        finally:
+            if brand.logo:
+                brand.logo.delete(save=False)
+
+
+class BrandFaviconErrorTests(TestCase):
+    def test_corrupt_image_raises_and_blocks_save(self):
+        corrupt = SimpleUploadedFile("bad.png", b"not a real image")
+        brand = Brand(name="B", logo=corrupt)
+        with self.assertRaises(Exception):
+            brand.save()
+
+
+class BackfillBrandFaviconsCommandTests(TestCase):
+    def test_backfill_generates_favicons(self):
+        brand1 = Brand.objects.create(name="B1")
+        brand1.logo.save("logo.png", _make_test_image(), save=True)
+        brand2 = Brand.objects.create(name="B2")
+        brand2.logo.save("logo.png", _make_test_image(), save=True)
+        brand3 = Brand.objects.create(name="NoLogo")
+        try:
+            from django.core.management import call_command
+            call_command("backfill_brand_favicons")
+            for b in [brand1, brand2]:
+                storage = b.logo.storage
+                path = f"brands/brand_{b.pk}/favicon.png"
+                self.assertTrue(storage.exists(path))
+        finally:
+            for b in [brand1, brand2]:
+                if b.logo:
+                    b.logo.delete(save=False)
 
 
 class PrimaryPaletteCssTests(TestCase):
@@ -286,8 +465,9 @@ class SeedBrandsCommandTests(TestCase):
             legacy_dir = os.path.join(media_root, "avatars", f"user_{brand_pk}")
             os.makedirs(legacy_dir, exist_ok=True)
             legacy_path = os.path.join(legacy_dir, "pic.png")
-            with open(legacy_path, "wb") as f:
-                f.write(b"data")
+            from PIL import Image as PilImage
+            img = PilImage.new("RGB", (50, 50), (255, 0, 0))
+            img.save(legacy_path, format="PNG")
             brand.logo.name = f"avatars/user_{brand_pk}/pic.png"
             brand.save()
 
