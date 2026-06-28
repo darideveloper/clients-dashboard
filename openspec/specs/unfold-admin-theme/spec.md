@@ -11,7 +11,7 @@ TBD - created by archiving change init-django-clients-project. Update Purpose af
 - **THEN** the Unfold-styled template is used (Unfold's `SITE_HEADER` "clients Admin" appears in the sidebar)
 
 ### Requirement: Unfold config block
-`settings.UNFOLD` SHALL set `SITE_TITLE`, `SITE_HEADER`, `SITE_SUBHEADER`, `SITE_URL="/"`, `SITE_ICON` resolving to `static("favicon.png")`, `SITE_LOGO` resolving to `static("logo.webp")`, `SITE_SYMBOL`, `SITE_FAVICONS` containing a 32×32 PNG pointing to `favicon.png`, `SHOW_HISTORY=True`, `SHOW_VIEW_ON_SITE=True`, `ENVIRONMENT` pointing to `utils.callbacks.environment_callback`, `THEME="light"`, an OKLCH `primary` color palette covering shades 50–950, and a `SIDEBAR` block with `show_search=True` and `show_all_applications=False`.
+`settings.UNFOLD` SHALL set `SITE_TITLE`, `SITE_HEADER`, `SITE_SUBHEADER`, `SITE_URL="/"`, `SITE_ICON` resolving to `static("favicon.png")`, `SITE_LOGO` resolving to `static("logo.webp")`, `SITE_SYMBOL`, `SITE_FAVICONS` containing a 32×32 PNG pointing to `favicon.png`, `SHOW_HISTORY=True`, `SHOW_VIEW_ON_SITE=True`, `ENVIRONMENT` pointing to `utils.callbacks.environment_callback`, `THEME="light"`, an OKLCH `primary` color palette covering shades 50–950, and a `SIDEBAR` block with `show_search=True`, `show_all_applications=True`, and an empty `navigation: []`. The sidebar body SHALL be rendered by the override template `project/templates/unfold/helpers/navigation.html`, which auto-renders every registered `ModelAdmin` filtered by the request user's per-model permissions; see the `unfold-permission-sidebar` capability for the rendering contract.
 
 #### Scenario: Site branding
 - **WHEN** the admin loads
@@ -20,6 +20,10 @@ TBD - created by archiving change init-django-clients-project. Update Purpose af
 #### Scenario: Environment badge
 - **WHEN** `ENV=dev` and `utils.callbacks.environment_callback` runs
 - **THEN** it returns `["Development", "info"]`
+
+#### Scenario: Sidebar uses auto-render with permission filter
+- **WHEN** a user loads any admin page
+- **THEN** the sidebar body is populated from `available_apps` (permission-filtered by Django's `AdminSite.get_app_list`) via the override template at `project/templates/unfold/helpers/navigation.html`, and `UNFOLD["SIDEBAR"]["navigation"]` is `[]`.
 
 ### Requirement: Unfolded auth admin
 `core/admin.py` SHALL unregister Django's default `User` and `Group` admins and re-register them using `project.admin_base.ModelAdminUnfoldBase` (which extends `unfold.admin.ModelAdmin`) mixed with `BaseUserAdmin` / `BaseGroupAdmin`. The `User` admin SHALL use `unfold.forms.UserChangeForm`, `unfold.forms.UserCreationForm`, and `unfold.forms.AdminPasswordChangeForm`. The `Group` admin SHALL NOT override forms. The registration SHALL live in `core/admin.py` (not `project/admin.py`) because `core` is in `INSTALLED_APPS` and `project` is not. See the `unfold-auth-admin-registration` capability for the full registration contract.
@@ -63,15 +67,4 @@ The repo SHALL include `static/css/style.css` with markdown preview typography r
 #### Scenario: Range date filter localized
 - **WHEN** the admin renders a list filter for `created_at`
 - **THEN** the `created_at_from` input's `placeholder` attribute is `Desde` and `created_at_to` is `Hasta`
-
-### Requirement: Authentication sidebar exposes Users and Groups
-`UNFOLD["SIDEBAR"]["navigation"]` SHALL include a section titled `Authentication` (or its translated equivalent) whose `items` list contains both a `Users` entry linking to `admin:auth_user_changelist` and a `Groups` entry linking to `admin:auth_group_changelist`. The section SHALL be `collapsible=False` so the entries are visible without interaction. Because `UNFOLD["SIDEBAR"]["show_all_applications"]` is `False`, the manual `items` list is the sole source of auth-related nav links.
-
-#### Scenario: Groups is reachable from the sidebar
-- **WHEN** a superuser renders any admin page
-- **THEN** the sidebar shows a `Groups` link under the `Authentication` section, the link's `href` resolves to `/admin/auth/group/`, and clicking it loads the Unfold-styled Group changelist.
-
-#### Scenario: Users link is unchanged
-- **WHEN** a superuser renders any admin page
-- **THEN** the `Users` link under the `Authentication` section is still present and still resolves to `/admin/auth/user/`.
 
