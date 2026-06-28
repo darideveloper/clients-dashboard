@@ -11,7 +11,14 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from core.models import Brand, Membership
-from utils.callbacks import primary_palette_css, site_favicon, site_icon
+from utils.callbacks import (
+    primary_palette_css,
+    site_favicon,
+    site_header,
+    site_icon,
+    site_subheader,
+    site_title,
+)
 
 
 class BrandModelTests(TestCase):
@@ -268,6 +275,44 @@ class SiteFaviconCallbackTests(TestCase):
         finally:
             if self.brand.logo:
                 self.brand.logo.delete(save=False)
+
+
+class SiteTitleCallbackTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username="u", email="u@x.test")
+        self.brand = Brand.objects.create(name="Acme Corp")
+
+    def test_unauthenticated_returns_fallback_title(self):
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        self.assertEqual(site_title(request), "clients")
+        self.assertEqual(site_header(request), "clients")
+        self.assertEqual(site_subheader(request), "Dashboard")
+
+    def test_authenticated_no_brand_returns_fallback(self):
+        request = self.factory.get("/")
+        request.user = self.user
+        self.assertEqual(site_title(request), "clients")
+        self.assertEqual(site_header(request), "clients")
+        self.assertEqual(site_subheader(request), "Dashboard")
+
+    def test_authenticated_with_brand_returns_branded_titles(self):
+        Membership.objects.create(user=self.user, brand=self.brand)
+        request = self.factory.get("/")
+        request.user = self.user
+        self.assertEqual(site_title(request), "Acme Corp")
+        self.assertEqual(site_header(request), "Acme Corp")
+        self.assertEqual(site_subheader(request), "Dashboard")
+
+    def test_default_brand_renders_name(self):
+        default = Brand.get_or_create_default()
+        Membership.objects.create(user=self.user, brand=default)
+        request = self.factory.get("/")
+        request.user = self.user
+        self.assertEqual(site_title(request), "Default Brand")
+        self.assertEqual(site_header(request), "Default Brand")
+        self.assertEqual(site_subheader(request), "Dashboard")
 
 
 class BrandFaviconGenerationTests(TestCase):

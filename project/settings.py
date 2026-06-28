@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from django.templatetags.static import static
 
-from utils.callbacks import site_favicon, site_icon
+from utils.callbacks import site_favicon, site_header, site_icon, site_subheader, site_title
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -208,9 +208,9 @@ REST_FRAMEWORK = {
 
 # django-unfold
 UNFOLD = {
-    "SITE_TITLE": "clients Admin",
-    "SITE_HEADER": "clients Admin",
-    "SITE_SUBHEADER": "clients Dashboard",
+    "SITE_TITLE": lambda request: site_title(request),
+    "SITE_HEADER": lambda request: site_header(request),
+    "SITE_SUBHEADER": lambda request: site_subheader(request),
     "SITE_URL": "/",
     "SITE_ICON": lambda request: site_icon(request),
     "SITE_SYMBOL": "directions_car",

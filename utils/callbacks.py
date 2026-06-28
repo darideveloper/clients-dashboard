@@ -2,6 +2,11 @@ import os
 
 from django.templatetags.static import static
 
+_request_attr = "_brand_name_cache"
+FALLBACK_TITLE = "clients"
+FALLBACK_HEADER = "clients"
+FALLBACK_SUBHEADER = "Dashboard"
+
 
 def environment_callback(request):
     env = os.getenv("ENV", "dev")
@@ -79,3 +84,31 @@ def primary_palette_css(request):
             for shade, L, C in PRIMARY_PALETTE_ANCHORS
         )
     return f":root {{\n{rules}\n}}"
+
+
+def _resolve_brand_name(request):
+    if hasattr(request, _request_attr):
+        return getattr(request, _request_attr)
+    user = getattr(request, "user", None)
+    brand = getattr(user, "brand", None) if user and user.is_authenticated else None
+    name = (brand.name or None) if brand else None
+    setattr(request, _request_attr, name)
+    return name
+
+
+def site_title(request):
+    name = _resolve_brand_name(request)
+    if name:
+        return name
+    return FALLBACK_TITLE
+
+
+def site_header(request):
+    name = _resolve_brand_name(request)
+    if name:
+        return name
+    return FALLBACK_HEADER
+
+
+def site_subheader(request):
+    return "Dashboard"
