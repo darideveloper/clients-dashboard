@@ -16,9 +16,13 @@ def environment_callback(request):
 
 def site_icon(request):
     user = getattr(request, "user", None)
-    avatar_url = getattr(user, "avatar_url", None)
-    if avatar_url:
-        return avatar_url
+    brand = getattr(user, "brand", None) if user and user.is_authenticated else None
+    logo = getattr(brand, "logo", None) if brand else None
+    if logo:
+        try:
+            return logo.url
+        except (ValueError, AttributeError):
+            pass
     return static("favicon.png")
 
 
@@ -44,8 +48,8 @@ def primary_palette_css(request):
     user = getattr(request, "user", None)
     color = None
     if user and user.is_authenticated:
-        profile = getattr(user, "profile", None)
-        color = getattr(profile, "primary_color", None) if profile else None
+        brand = getattr(user, "brand", None)
+        color = getattr(brand, "primary_color", None) if brand else None
     if not color:
         return ""
 
