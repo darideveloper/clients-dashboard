@@ -4,6 +4,8 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Group, User
 from django.db import models
 from django.utils.html import format_html
+from rest_framework.authtoken.admin import TokenAdmin as BaseTokenAdmin
+from rest_framework.authtoken.models import TokenProxy
 
 from core.models import Profile
 from project.admin_base import ModelAdminUnfoldBase
@@ -12,10 +14,12 @@ from unfold.widgets import UnfoldAdminColorInputWidget
 
 admin.site.unregister(User)
 admin.site.unregister(Group)
+admin.site.unregister(TokenProxy)
 
 
 @admin.register(Profile)
 class ProfileAdmin(ModelAdminUnfoldBase):
+    sidebar_icon = "badge"
     list_display = ("user", "has_avatar", "primary_color")
     list_display_links = ("user",)
     formfield_overrides = {
@@ -39,6 +43,7 @@ class ProfileInline(admin.StackedInline):
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin, ModelAdminUnfoldBase):
+    sidebar_icon = "person"
     form = UserChangeForm
     add_form = UserCreationForm
     change_password_form = AdminPasswordChangeForm
@@ -59,4 +64,9 @@ class UserAdmin(BaseUserAdmin, ModelAdminUnfoldBase):
 
 @admin.register(Group)
 class GroupAdmin(BaseGroupAdmin, ModelAdminUnfoldBase):
-    pass
+    sidebar_icon = "group"
+
+
+@admin.register(TokenProxy)
+class TokenAdmin(BaseTokenAdmin):
+    sidebar_icon = "key"
