@@ -2,10 +2,30 @@ import os
 
 from django.templatetags.static import static
 
-_request_attr = "_brand_name_cache"
+
 FALLBACK_TITLE = "clients"
 FALLBACK_HEADER = "clients"
 FALLBACK_SUBHEADER = "Dashboard"
+
+
+def _resolve_brand(request):
+    from core.models import Brand
+
+    if hasattr(request, "_brand_cache"):
+        return request._brand_cache
+
+    brand = getattr(request, "_brand_override", None)
+
+    if not brand:
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated:
+            brand = getattr(user, "brand", None)
+
+    if not brand:
+        brand = Brand.objects.filter(is_default=True).first()
+
+    request._brand_cache = brand
+    return brand
 
 
 def environment_callback(request):
@@ -20,8 +40,7 @@ def environment_callback(request):
 
 
 def site_icon(request):
-    user = getattr(request, "user", None)
-    brand = getattr(user, "brand", None) if user and user.is_authenticated else None
+    brand = _resolve_brand(request)
     logo = getattr(brand, "logo", None) if brand else None
     if logo:
         try:
@@ -32,8 +51,7 @@ def site_icon(request):
 
 
 def site_favicon(request):
-    user = getattr(request, "user", None)
-    brand = getattr(user, "brand", None) if user and user.is_authenticated else None
+    brand = _resolve_brand(request)
     if brand and brand.has_logo:
         url = brand.favicon_url
         if url:
@@ -60,11 +78,8 @@ PRIMARY_PALETTE_ANCHORS = [
 
 
 def primary_palette_css(request):
-    user = getattr(request, "user", None)
-    color = None
-    if user and user.is_authenticated:
-        brand = getattr(user, "brand", None)
-        color = getattr(brand, "primary_color", None) if brand else None
+    brand = _resolve_brand(request)
+    color = getattr(brand, "primary_color", None) if brand else None
     if not color:
         return ""
 
@@ -83,28 +98,20 @@ def primary_palette_css(request):
             f"  --color-primary-{shade}: oklch(from {color} {L} {C} h);"
             for shade, L, C in PRIMARY_PALETTE_ANCHORS
         )
-    return f":root {{\n{rules}\n}}"
-
-
-def _resolve_brand_name(request):
-    if hasattr(request, _request_attr):
-        return getattr(request, _request_attr)
-    user = getattr(request, "user", None)
-    brand = getattr(user, "brand", None) if user and user.is_authenticated else None
-    name = (brand.name or None) if brand else None
-    setattr(request, _request_attr, name)
-    return name
+    return f":root:root {{\n{rules}\n}}"
 
 
 def site_title(request):
-    name = _resolve_brand_name(request)
+    brand = _resolve_brand(request)
+    name = brand.name if brand else None
     if name:
         return name
     return FALLBACK_TITLE
 
 
 def site_header(request):
-    name = _resolve_brand_name(request)
+    brand = _resolve_brand(request)
+    name = brand.name if brand else None
     if name:
         return name
     return FALLBACK_HEADER

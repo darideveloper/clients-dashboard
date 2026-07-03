@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.db import models
+from django.utils.text import slugify
 from PIL import Image
 
 from core.validators import (
@@ -28,6 +29,9 @@ avatar_upload_to = brand_logo_upload_to
 
 
 class Brand(models.Model):
+    slug = models.SlugField(max_length=100, unique=True, blank=True)
+    is_default = models.BooleanField(default=False)
+
     name = models.CharField(
         max_length=100,
         unique=True,
@@ -103,6 +107,10 @@ class Brand(models.Model):
                 logger.warning("Failed to delete favicon at %s", path)
 
     def save(self, *args, **kwargs):
+        if self.is_default:
+            Brand.objects.exclude(pk=self.pk).update(is_default=False)
+        if not self.slug:
+            self.slug = slugify(self.name)
         super().save(*args, **kwargs)
         current_name = self.logo.name if self.logo else None
         if current_name != self._original_logo_name:
@@ -127,6 +135,7 @@ class Brand(models.Model):
             name=cls.DEFAULT_NAME,
             defaults={
                 "primary_color": cls.DEFAULT_PRIMARY_COLOR,
+                "is_default": True,
             },
         )
         return obj

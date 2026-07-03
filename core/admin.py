@@ -20,8 +20,9 @@ admin.site.unregister(TokenProxy)
 @admin.register(Brand)
 class BrandAdmin(ModelAdminUnfoldBase):
     sidebar_icon = "brand_family"
-    list_display = ("logo_thumb", "name", "primary_color", "user_count")
+    list_display = ("logo_thumb", "name", "primary_color", "is_default", "user_count")
     list_display_links = ("name",)
+    fields = ("name", "slug", "logo", "primary_color", "is_default")
 
     def formfield_for_dbfield(self, db_field, **kwargs):
         if db_field.name == "primary_color":

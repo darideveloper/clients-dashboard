@@ -28,6 +28,8 @@ The system SHALL store a 7-character hex color (`#RRGGBB`) on `core.Brand` as `p
 
 The system SHALL inject a per-request `<style>` block via the `utils.context_processors.user_palette` template context processor that overrides the 11 `--color-primary-{50,100,200,300,400,500,600,700,800,900,950}` CSS custom properties with an `oklch(from <brand primary_color> L C h)` palette. The `(L, C)` anchor pairs SHALL be the same as the project's static `UNFOLD["COLORS"]["primary"]` palette. The primary color is resolved through the unified `_resolve_brand(request)` 4-tier priority chain (URL override → user.brand → default brand → None). When the resolved brand is `None` or `primary_color` is empty, the callback SHALL return an empty string and the static `UNFOLD["COLORS"]["primary"]` palette SHALL apply unchanged.
 
+The CSS selector SHALL be `:root:root` (specificity 0,2,0) rather than `:root` (0,1,0). This ensures the brand palette wins against Unfold's `unfold-theme-colors` style tag (which uses `:root`, specificity 0,1,0) regardless of DOM order. The login page injects the palette via `{% block extrastyle %}` inside `<head>`, while Unfold's skeleton template renders `unfold-theme-colors` inside `<body>` — without the higher-specificity selector, Unfold's colors would win in the cascade.
+
 #### Scenario: User with custom color
 - **WHEN** an authenticated user with `primary_color = "#0066FF"` loads any admin page
 - **THEN** the rendered page includes a `<style>` block setting `--color-primary-600: oklch(from #0066FF 0.60 0.25 h);` and the primary-600 button background reflects the new color
@@ -41,6 +43,8 @@ The system SHALL inject a per-request `<style>` block via the `utils.context_pro
 - **THEN** `utils.callbacks.primary_palette_css` resolves the brand via the unified `_resolve_brand(request)` helper:
   - If a `Brand` with `is_default=True` exists, its `primary_color` palette SHALL be injected
   - If no default brand exists, the callback SHALL return an empty string and the static `UNFOLD["COLORS"]["primary"]` palette from settings SHALL apply
+- **AND** the palette SHALL be injected into the template context as `user_palette_css` by `utils.context_processors.user_palette`
+- **AND** the login page template (`project/templates/admin/login.html`) SHALL render `{{ user_palette_css|safe }}` inside `{% block extrastyle %}`, outputting `<style id="user-palette">` with the `:root:root` selector
 
 #### Scenario: Browser without `oklch(from)` support
 - **WHEN** a browser predates 2024 (no `oklch(from)` support) loads an admin page for a user with a non-default `primary_color`

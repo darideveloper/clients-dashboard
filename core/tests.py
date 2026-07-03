@@ -19,6 +19,8 @@ from utils.callbacks import (
     site_subheader,
     site_title,
 )
+from utils.callbacks import _resolve_brand
+from utils.middleware import BrandUrlMiddleware
 
 
 class BrandModelTests(TestCase):
@@ -42,6 +44,28 @@ class BrandModelTests(TestCase):
     def test_str_returns_name(self):
         brand = Brand.objects.create(name="Acme")
         self.assertEqual(str(brand), "Acme")
+
+    def test_is_default_enforcement(self):
+        a = Brand.objects.create(name="A", is_default=True)
+        b = Brand.objects.create(name="B", is_default=True)
+        a.refresh_from_db()
+        self.assertFalse(a.is_default)
+        self.assertTrue(b.is_default)
+
+    def test_slug_auto_generated_from_name(self):
+        brand = Brand.objects.create(name="Test Brand")
+        self.assertEqual(brand.slug, "test-brand")
+
+    def test_slug_preserved_on_update(self):
+        brand = Brand.objects.create(name="Old Name")
+        brand.name = "New Name"
+        brand.save()
+        self.assertEqual(brand.slug, "old-name")
+
+    def test_get_or_create_default_sets_is_default(self):
+        Brand.objects.filter(name=Brand.DEFAULT_NAME).delete()
+        default = Brand.get_or_create_default()
+        self.assertTrue(default.is_default)
 
 
 class MembershipTests(TestCase):
@@ -565,3 +589,221 @@ class AvatarUploadSizeTests(TestCase):
         from core.validators import validate_image_size
         small = mock.Mock(size=1024)
         validate_image_size(small)
+
+
+class ResolveBrandTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username="alice", email="a@x.test")
+        self.brand = Brand.objects.create(name="Acme")
+        Membership.objects.create(user=self.user, brand=self.brand)
+        self.default_brand = Brand.objects.create(name="Default", is_default=True)
+
+    def test_url_override_wins(self):
+        override = Brand.objects.create(name="Override")
+        request = self.factory.get("/")
+        request.user = self.user
+        request._brand_override = override
+        result = _resolve_brand(request)
+        self.assertEqual(result, override)
+
+    def test_user_brand_wins_without_url_override(self):
+        request = self.factory.get("/")
+        request.user = self.user
+        result = _resolve_brand(request)
+        self.assertEqual(result, self.brand)
+
+    def test_is_default_wins_when_no_user_brand(self):
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        result = _resolve_brand(request)
+        self.assertEqual(result, self.default_brand)
+
+    def test_returns_none_when_nothing_exists(self):
+        Membership.objects.filter(user=self.user).delete()
+        Brand.objects.all().delete()
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        result = _resolve_brand(request)
+        self.assertIsNone(result)
+
+    def test_cache_avoids_duplicate_queries(self):
+        Membership.objects.filter(user=self.user).delete()
+        Brand.objects.all().delete()
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        with self.assertNumQueries(1):
+            _resolve_brand(request)
+            _resolve_brand(request)
+
+
+class SiteTitleCallbackDefaultBrandTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user(username="u", email="u@x.test")
+
+    def test_unauthenticated_with_default_brand(self):
+        default = Brand.objects.create(name="Default Co", is_default=True)
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        self.assertEqual(site_title(request), "Default Co")
+        self.assertEqual(site_header(request), "Default Co")
+
+    def test_unauthenticated_no_default_brand(self):
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        self.assertEqual(site_title(request), "clients")
+        self.assertEqual(site_header(request), "clients")
+
+    def test_url_override_returns_brand_name(self):
+        override = Brand.objects.create(name="URL Co")
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        request._brand_override = override
+        self.assertEqual(site_title(request), "URL Co")
+        self.assertEqual(site_header(request), "URL Co")
+
+
+class SiteIconCallbackDefaultBrandTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self._static_patcher = mock.patch(
+            "utils.callbacks.static", return_value="/static/favicon.png"
+        )
+        self._static_patcher.start()
+
+    def tearDown(self):
+        self._static_patcher.stop()
+
+    def test_returns_default_brand_logo_when_no_user_brand(self):
+        Brand.objects.create(name="Def", is_default=True)
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        result = site_icon(request)
+        self.assertIn("favicon", result)
+
+    def test_url_override_returns_brand_logo(self):
+        override = Brand.objects.create(name="URL")
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        request._brand_override = override
+        result = site_icon(request)
+        self.assertIn("favicon", result)
+
+
+class SiteFaviconCallbackDefaultBrandTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self._static_patcher = mock.patch(
+            "utils.callbacks.static", return_value="/static/favicon.png"
+        )
+        self._static_patcher.start()
+
+    def tearDown(self):
+        self._static_patcher.stop()
+
+    def test_returns_default_brand_favicon_when_no_user_brand(self):
+        Brand.objects.create(name="Def", is_default=True)
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        result = site_favicon(request)
+        self.assertIn("favicon", result)
+
+    def test_url_override_returns_brand_favicon(self):
+        override = Brand.objects.create(name="URL")
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        request._brand_override = override
+        result = site_favicon(request)
+        self.assertIn("favicon", result)
+
+
+class PrimaryPaletteCssDefaultBrandTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_selector_has_higher_specificity_than_unfold(self):
+        Brand.objects.create(name="Def", primary_color="#0066FF", is_default=True)
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        css = primary_palette_css(request)
+        self.assertTrue(
+            css.startswith(":root:root"),
+            f"Expected :root:root selector for higher specificity, got: {css.split('{')[0].strip()}",
+        )
+
+    def test_returns_default_brand_palette_when_no_user_brand(self):
+        Brand.objects.create(name="Def", primary_color="#0066FF", is_default=True)
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        css = primary_palette_css(request)
+        self.assertIn(":root", css)
+        self.assertIn("oklch(from #0066FF", css)
+
+    def test_url_override_returns_brand_palette(self):
+        override = Brand.objects.create(name="URL", primary_color="#00AA00")
+        request = self.factory.get("/")
+        request.user = mock.Mock(is_authenticated=False)
+        request._brand_override = override
+        css = primary_palette_css(request)
+        self.assertIn(":root", css)
+        self.assertIn("oklch(from #00AA00", css)
+
+
+class BrandUrlMiddlewareTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.brand = Brand.objects.create(name="Acme Corp")
+        self.brand.slug = "acme-corp"
+        self.brand.save(update_fields=["slug"])
+        self.middleware = BrandUrlMiddleware(lambda r: None)
+
+    def test_login_page_extracts_brand(self):
+        request = self.factory.get("/admin/login/?brand=acme-corp")
+        self.middleware(request)
+        self.assertEqual(request._brand_override, self.brand)
+
+    def test_non_existent_slug_ignored(self):
+        request = self.factory.get("/admin/login/?brand=nonexistent")
+        self.middleware(request)
+        self.assertFalse(hasattr(request, "_brand_override"))
+
+    def test_non_login_path_ignored(self):
+        request = self.factory.get("/admin/?brand=acme-corp")
+        self.middleware(request)
+        self.assertFalse(hasattr(request, "_brand_override"))
+
+    def test_post_login_preserves_branding(self):
+        request = self.factory.post("/admin/login/?brand=acme-corp")
+        self.middleware(request)
+        self.assertEqual(request._brand_override, self.brand)
+
+
+class BrandAdminTests(TestCase):
+    def setUp(self):
+        from core.admin import BrandAdmin
+        self.admin = BrandAdmin(Brand, None)
+        self.superuser = User.objects.create_superuser(
+            username="su", email="su@x.test", password="x"
+        )
+
+    def test_is_default_in_list_display(self):
+        self.assertIn("is_default", self.admin.list_display)
+
+    def test_non_superuser_no_brand_admin_access(self):
+        from django.test import RequestFactory
+        factory = RequestFactory()
+        request = factory.get("/")
+        staff = User.objects.create_user(
+            username="s", email="s@x.test", password="x", is_staff=True
+        )
+        request.user = staff
+        self.assertFalse(self.admin.has_change_permission(request))
+
+
+class SeedBrandsCommandIsDefaultTests(TestCase):
+    def test_creates_default_brand_with_is_default(self):
+        Brand.objects.filter(name=Brand.DEFAULT_NAME).delete()
+        call_command("seed_brands")
+        default = Brand.get_or_create_default()
+        self.assertTrue(default.is_default)

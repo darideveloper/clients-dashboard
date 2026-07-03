@@ -55,6 +55,14 @@ TBD - created by archiving change init-django-clients-project. Update Purpose af
 ### Requirement: Admin template override
 `project/templates/admin/base_site.html` SHALL extend `admin/base.html` (NOT `unfold/layouts/base.html` — extending the internal layout breaks Unfold's sticky bottom bar and responsive grid; this contradicts the `django-project-setup` doc which shows `unfold/layouts/base.html`, but `django-unfold-admin` doc §8 is the canonical guidance). The template SHALL load `simplemde.min.css`, `simplemde.min.js` from the SimpleMDE CDN, the local `static/css/style.css`, and the local JS files `add_tailwind_styles.js`, `load_markdown.js`, and `range_date_filter_es.js`.
 
+### Requirement: Login template injects brand palette
+`project/templates/admin/login.html` SHALL extend `admin/login.html` (Unfold's) and override `{% block extrastyle %}` to inject the `user_palette_css` context variable as `<style id="user-palette">`. This override is necessary because the Unfold login page template chain (`skeleton.html` → `unauthenticated.html` → `login.html`) does NOT extend `admin/base.html`, so the `project/templates/admin/base.html` base block override does not apply to the login page. The injection is rendered inside `<head>` via the `extrastyle` block, before Unfold's `unfold-theme-colors` style tag in `<body>`.
+
+#### Scenario: Login page shows brand palette
+- **WHEN** an unauthenticated request renders `GET /admin/login/` and a `Brand` with `is_default=True` has a `primary_color`
+- **THEN** the rendered HTML SHALL include `<style id="user-palette">` with the brand's `:root:root` CSS custom property palette
+- **AND** the brand palette SHALL take visual effect (higher-specificity `:root:root` overrides Unfold's static `:root` palette)
+
 #### Scenario: Markdown editor injected
 - **WHEN** an admin form contains a `textarea`
 - **THEN** SimpleMDE replaces the textarea after the page loads (verified by the presence of `.editor-toolbar` in the DOM)
