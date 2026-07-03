@@ -7,6 +7,8 @@ TBD - created by archiving change profile-to-brand. Update Purpose after archive
 The system SHALL provide a `Brand` model (Django `app_label=core`) that represents a company/tenant and stores the company logo and primary brand color used to customize the admin chrome.
 
 - Fields:
+  - `slug`: `SlugField(max_length=100, unique=True, blank=True)` — URL-safe identifier auto-generated from `name`, used in login page `?brand=<slug>` query parameter.
+  - `is_default`: `BooleanField(default=False)` — designates the system-wide fallback brand. `save()` enforces that only one brand holds `is_default=True` at a time.
   - `logo`: `ImageField`, optional (`blank=True`), validated for image size (existing `validate_image_size`).
   - `primary_color`: `CharField(max_length=7)`, default `"#C92FFF"`, validated by `validate_hex_color` and `validate_contrast_against_white`.
 - The model MUST replace the previous `Profile` model (renamed, not recreated). The schema migration is produced only by `makemigrations core` (no hand-edits). The data back-fill is performed by the `core/management/commands/seed_brands.py` command run once after the schema migration applies.
@@ -96,8 +98,8 @@ The system SHALL NOT auto-create a `Brand` for newly created users via a `post_s
 - **THEN** `UserAdmin.save_model` MUST assign the Default Brand (`Brand.get_or_create_default()`) before save
 - **AND** no `post_save` signal handler MUST run
 
-### Requirement: Top-left site icon reflects the user's brand logo
-The `UNFOLD["SITE_ICON"]` callback (`utils.callbacks.site_icon`) SHALL source the admin header logo from `request.user.brand.logo.url`, falling back to the configured `static("favicon.png")` when the brand has no logo or the user is unauthenticated.
+### Requirement: Top-left site icon reflects the resolved brand logo
+The `UNFOLD["SITE_ICON"]` callback (`utils.callbacks.site_icon`) SHALL source the admin header logo from the brand resolved via `_resolve_brand(request)` (4-tier priority chain). It SHALL fall back to the configured `static("favicon.png")` when the resolved brand has no logo or when no brand resolves.
 
 #### Scenario: User with a branded logo
 - **WHEN** an authenticated user with a `Brand` that has a `logo` loads the admin
@@ -111,10 +113,10 @@ The `UNFOLD["SITE_ICON"]` callback (`utils.callbacks.site_icon`) SHALL source th
 - **WHEN** an unauthenticated request reaches the site icon callback
 - **THEN** the system MUST return `static("favicon.png")`
 
-### Requirement: Primary color palette reflects the user's brand
-The `utils.callbacks.primary_palette_css` callback SHALL generate `:root { --color-primary-* }` CSS variables from `request.user.brand.primary_color` and MUST be referenced by `project/templates/admin/base.html` via the existing `user_palette_css` template context variable.
+### Requirement: Primary color palette reflects the resolved brand
+The `utils.callbacks.primary_palette_css` callback SHALL generate `:root { --color-primary-* }` CSS variables from the `primary_color` of the brand resolved via `_resolve_brand(request)` (4-tier priority chain). The result MUST be injected as the `user_palette_css` template context variable by `utils.context_processors.user_palette`.
 
-- When the user has no brand or the primary color is empty/missing, the callback MUST return an empty string and no inline palette MUST be rendered.
+- When no brand resolves or the primary color is empty/missing, the callback MUST return an empty string and no inline palette MUST be rendered.
 
 #### Scenario: Authenticated user with brand primary color
 - **WHEN** an authenticated user with a `Brand` whose `primary_color` is set loads the admin
@@ -214,11 +216,11 @@ The system SHALL expose `utils.callbacks.site_favicon(request)` that resolves to
 - **THEN** the `UNFOLD["SITE_FAVICONS"]` link SHALL point to the brand's auto-generated favicon URL
 
 ### Requirement: Brand.name drives admin chrome site titles
-The `Brand.name` field SHALL serve as the source for the admin's `SITE_TITLE` and `SITE_HEADER` Unfold config values, formatted as `brand.name`. The `SITE_SUBHEADER` SHALL always be `"Dashboard"`. Anonymous users and users without a brand SHALL see fallback values `"clients"` / `"Dashboard"`.
+The `Brand.name` field SHALL serve as the source for the admin's `SITE_TITLE` and `SITE_HEADER` Unfold config values, formatted as `brand.name`. The `SITE_SUBHEADER` SHALL always be `"Dashboard"`. The active brand is resolved through a unified 4-tier priority chain: (1) URL override `?brand=<slug>` on the login page, (2) authenticated user's `Membership.brand`, (3) the `Brand` with `is_default=True`, (4) hardcoded fallback `"clients"` / `"Dashboard"`.
 
-- The callbacks `utils.callbacks.site_title` and `utils.callbacks.site_header` SHALL resolve `request.user.brand.name`
+- The callbacks `utils.callbacks.site_title` and `utils.callbacks.site_header` SHALL call `_resolve_brand(request)` which implements the 4-tier chain
 - The default brand row (`name="Default Brand"`) SHALL produce `"Default Brand"` / `"Dashboard"` — no special-case filtering
-- Each callback SHALL fall back to its application-default string when the user is unauthenticated or has no brand
+- When no brand resolves (tier 4), each callback SHALL fall back to its application-default string
 
 #### Scenario: Branded site header text
 - **WHEN** an authenticated user whose brand has `name="Acme Corp"` loads the admin

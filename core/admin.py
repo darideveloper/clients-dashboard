@@ -8,6 +8,7 @@ from rest_framework.authtoken.models import TokenProxy
 
 from core.models import Brand, Membership
 from project.admin_base import ModelAdminUnfoldBase
+from unfold.admin import StackedInline as UnfoldStackedInline
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 from unfold.widgets import UnfoldAdminColorInputWidget
 
@@ -54,7 +55,7 @@ class BrandAdmin(ModelAdminUnfoldBase):
         return request.user.is_superuser
 
 
-class MembershipInline(admin.StackedInline):
+class MembershipInline(UnfoldStackedInline):
     model = Membership
     can_delete = False
     verbose_name_plural = "Brand"
