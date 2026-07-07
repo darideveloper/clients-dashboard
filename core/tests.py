@@ -801,6 +801,42 @@ class BrandAdminTests(TestCase):
         self.assertFalse(self.admin.has_change_permission(request))
 
 
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    },
+)
+class LogoutBrandRenderingTests(TestCase):
+    def setUp(self):
+        Brand.objects.all().delete()
+        self.client = Client(HTTP_HOST="localhost")
+
+    def _login(self):
+        User.objects.create_superuser("admin", "admin@test.com", "admin123")
+        self.client.login(username="admin", password="admin123")
+
+    def test_brand_palette_renders_on_logout_page(self):
+        Brand.objects.create(name="Def", slug="def", is_default=True, primary_color="#C92FFF")
+        self._login()
+        response = self.client.post(reverse("admin:logout"))
+        content = response.content.decode()
+        self.assertIn('<style id="user-palette">', content)
+        self.assertIn(":root:root", content)
+        self.assertIn("oklch(from #C92FFF", content)
+
+    def test_graceful_fallback_when_palette_empty(self):
+        # No default brand exists — user_palette_css will be empty
+        self._login()
+        response = self.client.post(reverse("admin:logout"))
+
+        content = response.content.decode()
+        # The template guard should suppress the style tag
+        self.assertNotIn('style id="user-palette"', content)
+        # Verify the page still renders correctly
+        self.assertIn("successfully logged out", content.lower())
+
+
 class SeedBrandsCommandIsDefaultTests(TestCase):
     def test_creates_default_brand_with_is_default(self):
         Brand.objects.filter(name=Brand.DEFAULT_NAME).delete()

@@ -1,0 +1,9 @@
+{% extends "registration/logged_out.html" %}
+{% block extrastyle %}
+    {{ block.super }}
+    {% if user_palette_css %}
+    <style id="user-palette">
+        {{ user_palette_css|safe }}
+    </style>
+    {% endif %}
+{% endblock %}
