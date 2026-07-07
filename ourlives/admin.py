@@ -1,4 +1,5 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
 from solo.admin import SingletonModelAdmin
 
 from project.admin_base import ModelAdminUnfoldBase
@@ -25,8 +26,14 @@ class InvitationCodeAdmin(ModelAdminUnfoldBase):
     @admin.display(description="Usage %")
     def usage_percentage(self, obj):
         if obj.max_use == 0:
-            return "—"
+            return "\u2014"
         return f"{obj.current_use / obj.max_use * 100:.0f}%"
+
+    def save_model(self, request, obj, form, change):
+        try:
+            super().save_model(request, obj, form, change)
+        except ValidationError as e:
+            self.message_user(request, str(e), messages.ERROR)
 
 
 @admin.register(AppSettings)

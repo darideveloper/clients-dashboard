@@ -120,7 +120,8 @@ class AppSettingsTests(TestCase):
         settings = AppSettings.get_solo()
         self.assertEqual(str(settings), "App Settings")
 
-    def test_reduce_total_tokens_below_assigned_succeeds(self):
+    def test_reduce_total_tokens_below_assigned_via_update_succeeds(self):
+        """AppSettings.objects.update() bypasses save() validation."""
         project = Project.objects.create(name="Test")
         InvitationCode.objects.create(project=project, max_use=80)
         self.assertEqual(AppSettings.get_solo().tokens_assigned, 80)
@@ -129,3 +130,12 @@ class AppSettingsTests(TestCase):
         self.assertEqual(settings.total_tokens, 50)
         with self.assertRaises(ValidationError):
             InvitationCode.objects.create(project=project, max_use=1)
+
+    def test_reduce_total_tokens_below_assigned_via_save_raises_error(self):
+        project = Project.objects.create(name="Test")
+        InvitationCode.objects.create(project=project, max_use=80)
+        self.assertEqual(AppSettings.get_solo().tokens_assigned, 80)
+        settings = AppSettings.get_solo()
+        settings.total_tokens = 50
+        with self.assertRaises(ValidationError):
+            settings.save()

@@ -59,6 +59,33 @@ class InvitationCode(models.Model):
     def __str__(self):
         return self.code
 
+    def clean(self):
+        app_settings = AppSettings.get_solo()
+
+        if self.pk is not None:
+            old = InvitationCode.objects.get(pk=self.pk)
+            if self.max_use < old.current_use:
+                raise ValidationError({
+                    "max_use": (
+                        f"max_use ({self.max_use}) cannot be less than "
+                        f"current_use ({old.current_use})"
+                    ),
+                })
+
+        qs = InvitationCode.objects.all()
+        if self.pk:
+            qs = qs.exclude(pk=self.pk)
+        assigned = qs.aggregate(total=models.Sum("max_use"))["total"] or 0
+
+        if assigned + self.max_use > app_settings.total_tokens:
+            raise ValidationError({
+                "max_use": (
+                    f"Not enough tokens. Available: "
+                    f"{app_settings.total_tokens - assigned}, "
+                    f"Requested: {self.max_use}"
+                ),
+            })
+
     def save(self, *args, **kwargs):
         from django.db import transaction
 
@@ -105,6 +132,20 @@ class AppSettings(SingletonModel):
 
     def __str__(self):
         return "App Settings"
+
+    def clean(self):
+        if self.total_tokens < self.tokens_assigned:
+            raise ValidationError({
+                "total_tokens": (
+                    f"Cannot set total tokens ({self.total_tokens}) "
+                    f"below currently assigned tokens "
+                    f"({self.tokens_assigned})"
+                ),
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     @property
     def tokens_assigned(self):
