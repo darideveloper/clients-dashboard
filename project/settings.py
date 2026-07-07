@@ -26,6 +26,8 @@ ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if
 
 HOST = os.getenv("HOST", "").rstrip("/")
 
+LOGIN_REDIRECT_URL = "/admin/"
+
 # Storage location constants are always defined (no AttributeError if storage_backends is imported in dev)
 _AWS_PROJECT_FOLDER = os.getenv("AWS_PROJECT_FOLDER", "")
 STATIC_LOCATION = f"{_AWS_PROJECT_FOLDER}/static" if _AWS_PROJECT_FOLDER else "static"
