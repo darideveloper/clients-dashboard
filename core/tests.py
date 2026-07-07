@@ -837,6 +837,70 @@ class LogoutBrandRenderingTests(TestCase):
         self.assertIn("successfully logged out", content.lower())
 
 
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    },
+)
+class LogoutBrandLinkTests(TestCase):
+    def setUp(self):
+        Brand.objects.all().delete()
+        self.client = Client(HTTP_HOST="localhost")
+
+    def _assert_button_url(self, response, expected_url):
+        content = response.content.decode()
+        self.assertIn(expected_url, content)
+        self.assertIn("Log in again", content)
+
+    def test_button_links_to_branded_login_with_user_brand(self):
+        """5.1/5.2: 'Log in again' button links to /admin/login/?brand=<slug>
+        when user has a brand. current_brand_slug is populated from
+        _brand_cache (set by each_context before auth_logout)."""
+        brand = Brand.objects.create(name="TestBrand6", slug="testbrand6",
+                                     is_default=True, primary_color="#C92FFF")
+        User.objects.create_superuser("admin", "admin@test.com", "admin123")
+        self.client.login(username="admin", password="admin123")
+
+        response = self.client.post(reverse("admin:logout"))
+        expected_url = reverse("admin:login") + f"?brand={brand.slug}"
+        self._assert_button_url(response, expected_url)
+
+    def test_button_links_to_branded_login_with_default_brand(self):
+        """'Log in again' button links to /admin/login/?brand=<slug>
+        when only a default brand exists (no user brand)."""
+        Brand.objects.create(name="Default", slug="default-co",
+                             is_default=True, primary_color="#C92FFF")
+        User.objects.create_superuser("admin", "admin@test.com", "admin123")
+        self.client.login(username="admin", password="admin123")
+
+        response = self.client.post(reverse("admin:logout"))
+        expected_url = reverse("admin:login") + "?brand=default-co"
+        self._assert_button_url(response, expected_url)
+
+    def test_button_falls_back_to_admin_without_brand(self):
+        """5.3: Logout page button falls back to /admin/ when
+        current_brand_slug is empty (no brand at all)."""
+        User.objects.create_superuser("admin", "admin@test.com", "admin123")
+        self.client.login(username="admin", password="admin123")
+
+        response = self.client.post(reverse("admin:logout"))
+
+        expected_url = reverse("admin:index")
+        self._assert_button_url(response, expected_url)
+
+    def test_no_brand_no_default_falls_back(self):
+        """Button falls back to /admin/ when neither user brand nor
+        default brand exists."""
+        User.objects.create_superuser("admin", "admin@test.com", "admin123")
+        self.client.login(username="admin", password="admin123")
+
+        response = self.client.post(reverse("admin:logout"))
+
+        expected_url = reverse("admin:index")
+        self._assert_button_url(response, expected_url)
+
+
 class SeedBrandsCommandIsDefaultTests(TestCase):
     def test_creates_default_brand_with_is_default(self):
         Brand.objects.filter(name=Brand.DEFAULT_NAME).delete()
