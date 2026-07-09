@@ -10,6 +10,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", RedirectView.as_view(url="/admin/"), name="home-redirect-admin"),
     path("api/", include(router.urls)),
+    path("stripe/", include("ourlives.urls")),
 ]
 
 if settings.DEBUG:

@@ -1,0 +1,213 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}Purchase Credits{% endblock %}
+
+{% block extrastyle %}
+<style>
+  .purchase-container {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background: var(--color-base-50);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .purchase-container h1 {
+    margin-top: 0;
+    font-size: 1.5rem;
+  }
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+  .form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .form-group input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--color-base-300);
+    border-radius: 6px;
+    font-size: 1.25rem;
+    box-sizing: border-box;
+  }
+  .form-group input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .preview {
+    font-size: 1.1rem;
+    padding: 1rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+  }
+  .preview.active {
+    background: var(--color-primary-50);
+    color: var(--color-primary-700);
+  }
+  .preview.inactive {
+    background: var(--color-base-100);
+    color: var(--color-base-500);
+  }
+  .buy-btn {
+    display: inline-block;
+    padding: 0.75rem 2rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #fff;
+    background: var(--color-primary-600);
+  }
+  .buy-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--color-base-400);
+  }
+  .buy-btn:hover:not(:disabled) {
+    background: var(--color-primary-700);
+  }
+  .error-msg {
+    color: var(--color-red-600);
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+  .stats {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .stat {
+    flex: 1;
+    min-width: 120px;
+    padding: 1rem;
+    background: var(--color-base-100);
+    border-radius: 6px;
+    text-align: center;
+  }
+  .stat .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+  .stat .label {
+    font-size: 0.85rem;
+    color: var(--color-base-500);
+    margin-top: 0.25rem;
+  }
+  .pricing-info {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--color-base-100);
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="purchase-container">
+  <h1>Purchase Credits</h1>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="value">{{ total_tokens }}</div>
+      <div class="label">Total Tokens</div>
+    </div>
+    <div class="stat">
+      <div class="value">{{ tokens_available }}</div>
+      <div class="label">Available Tokens</div>
+    </div>
+  </div>
+
+  {% if not is_configured %}
+    <div class="error-msg">
+      Pricing is not configured. Set a price per token in App Settings before making purchases.
+    </div>
+    <div class="preview inactive">
+      Purchase form is disabled until pricing is configured.
+    </div>
+  {% else %}
+    <div class="pricing-info">
+      <strong>Price per token:</strong> ${{ price_per_token|floatformat:2 }}
+      {% if min_purchase_amount > 0 %}
+        &nbsp;|&nbsp; <strong>Minimum purchase:</strong> ${{ min_purchase_amount|floatformat:2 }}
+      {% endif %}
+    </div>
+
+    <form id="purchase-form" method="POST" action="/stripe/create-checkout/">
+      {% csrf_token %}
+
+      <div class="form-group">
+        <label for="amount">Amount (USD)</label>
+        <input
+          type="number"
+          id="amount"
+          name="amount"
+          min="{{ min_purchase_amount }}"
+          step="0.01"
+          placeholder="0.00"
+          required
+        />
+      </div>
+
+      <div id="preview" class="preview inactive">
+        Enter an amount to see token preview
+      </div>
+
+      <button type="submit" id="buy-btn" class="buy-btn" disabled>
+        Buy Credits
+      </button>
+    </form>
+  {% endif %}
+</div>
+
+<script>
+  (function() {
+    var pricePerToken = {{ price_per_token|default:0|floatformat:2 }};
+    var minPurchase = {{ min_purchase_amount|default:0|floatformat:2 }};
+    var amountInput = document.getElementById('amount');
+    var preview = document.getElementById('preview');
+    var buyBtn = document.getElementById('buy-btn');
+
+    if (!amountInput || !preview || !buyBtn) return;
+
+    function updatePreview() {
+      var amount = parseFloat(amountInput.value);
+
+      if (isNaN(amount) || amount <= 0) {
+        preview.className = 'preview inactive';
+        preview.textContent = 'Enter an amount to see token preview';
+        buyBtn.disabled = true;
+        return;
+      }
+
+      if (minPurchase > 0 && amount < minPurchase) {
+        preview.className = 'preview inactive';
+        preview.textContent = 'Minimum purchase amount is $' + minPurchase.toFixed(2);
+        buyBtn.disabled = true;
+        return;
+      }
+
+      var tokens = Math.floor(amount / pricePerToken);
+
+      if (tokens < 1) {
+        preview.className = 'preview inactive';
+        preview.textContent = 'Amount too low — enter at least $' + pricePerToken.toFixed(2) + ' to buy 1 token';
+        buyBtn.disabled = true;
+        return;
+      }
+
+      preview.className = 'preview active';
+      preview.textContent = 'You will receive ' + tokens + ' token' + (tokens === 1 ? '' : 's');
+      buyBtn.disabled = false;
+    }
+
+    amountInput.addEventListener('input', updatePreview);
+    amountInput.addEventListener('change', updatePreview);
+  })();
+</script>
+{% endblock %}

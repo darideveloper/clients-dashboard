@@ -1,8 +1,14 @@
+import json
+from decimal import Decimal
+from unittest.mock import patch
+
+from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, Client
+from django.urls import reverse
 
-from ourlives.models import AppSettings, InvitationCode, Project
+from ourlives.models import AppSettings, InvitationCode, Project, StripeEvent, calculate_token_count
 
 
 class ProjectTests(TestCase):
@@ -139,3 +145,425 @@ class AppSettingsTests(TestCase):
         settings.total_tokens = 50
         with self.assertRaises(ValidationError):
             settings.save()
+
+
+from decimal import Decimal as D
+
+
+class AppSettingsPricingValidationTests(TestCase):
+    def setUp(self):
+        self.settings = AppSettings.get_solo()
+
+    def test_rejects_negative_price_per_token(self):
+        self.settings.price_per_token = D("-1")
+        with self.assertRaises(ValidationError):
+            self.settings.save()
+
+    def test_rejects_negative_min_purchase_amount(self):
+        self.settings.min_purchase_amount = D("-5")
+        with self.assertRaises(ValidationError):
+            self.settings.save()
+
+    def test_allows_zero_price_per_token(self):
+        self.settings.price_per_token = D("0")
+        self.settings.min_purchase_amount = D("0")
+        try:
+            self.settings.save()
+        except ValidationError:
+            self.fail("Zero price_per_token should be allowed")
+
+    def test_allows_zero_min_purchase_amount(self):
+        self.settings.price_per_token = D("0.10")
+        self.settings.min_purchase_amount = D("0")
+        try:
+            self.settings.save()
+        except ValidationError:
+            self.fail("Zero min_purchase_amount should be allowed")
+
+    def test_allows_valid_pricing(self):
+        self.settings.price_per_token = D("0.50")
+        self.settings.min_purchase_amount = D("5.00")
+        try:
+            self.settings.save()
+        except ValidationError:
+            self.fail("Valid pricing should be allowed")
+
+
+class CalculateTokenCountTests(TestCase):
+    def test_exact_division(self):
+        self.assertEqual(calculate_token_count(D("10.00"), D("0.10")), 100)
+
+    def test_non_exact_division(self):
+        self.assertEqual(calculate_token_count(D("5.00"), D("0.30")), 16)
+
+    def test_amount_below_price_returns_zero(self):
+        self.assertEqual(calculate_token_count(D("1.00"), D("1.50")), 0)
+
+    def test_zero_price_returns_zero(self):
+        self.assertEqual(calculate_token_count(D("10.00"), D("0")), 0)
+
+    def test_large_amount(self):
+        self.assertEqual(calculate_token_count(D("1000.00"), D("0.05")), 20000)
+
+
+class CanPurchaseTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def _create_admin_user(self):
+        user = User.objects.create_superuser("admin", "admin@test.com", "password")
+        return user
+
+    def _create_staff_user(self, permissions=None):
+        user = User.objects.create_user("staff", "staff@test.com", "password", is_staff=True)
+        if permissions:
+            for perm in permissions:
+                app_label, codename = perm.split(".")
+                user.user_permissions.add(
+                    Permission.objects.get(content_type__app_label=app_label, codename=codename)
+                )
+        return user
+
+    def test_admin_user_can_purchase(self):
+        from ourlives.admin import can_purchase
+        user = self._create_admin_user()
+        request = type("Request", (), {"user": user, "is_staff": True})()
+        self.assertTrue(can_purchase(request))
+
+    def test_ourlives_staff_user_can_purchase(self):
+        from ourlives.admin import can_purchase
+        user = self._create_staff_user(["ourlives.view_project"])
+        request = type("Request", (), {"user": user, "is_staff": True})()
+        self.assertTrue(can_purchase(request))
+
+    def test_non_ourlives_staff_cannot_purchase(self):
+        from ourlives.admin import can_purchase
+        user = self._create_staff_user([])
+        request = type("Request", (), {"user": user, "is_staff": True})()
+        self.assertFalse(can_purchase(request))
+
+    def test_non_staff_user_cannot_purchase(self):
+        from ourlives.admin import can_purchase
+        user = User.objects.create_user("regular", "regular@test.com", "password")
+        request = type("Request", (), {"user": user, "is_staff": False})()
+        self.assertFalse(can_purchase(request))
+
+
+class CreateCheckoutSessionTests(TestCase):
+    @patch("ourlives.stripe.stripe.checkout.Session.create")
+    def test_create_checkout_session_correct_metadata(self, mock_create):
+        mock_create.return_value = type("Session", (), {"url": "https://checkout.stripe.com/test"})()
+
+        from ourlives.stripe import create_checkout_session
+
+        url = create_checkout_session(
+            amount_usd=10.00,
+            token_count=100,
+            app_settings_id=1,
+            success_url="https://example.com/admin/ourlives/appsettings/purchase/",
+            cancel_url="https://example.com/admin/ourlives/appsettings/purchase/",
+        )
+
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args[1]
+        self.assertEqual(call_kwargs["metadata"]["source"], "ourlives")
+        self.assertEqual(call_kwargs["metadata"]["token_count"], "100")
+        self.assertEqual(call_kwargs["metadata"]["app_settings_id"], "1")
+        self.assertIn("success_url", call_kwargs)
+        self.assertIn("cancel_url", call_kwargs)
+        self.assertIn("/admin/ourlives/appsettings/purchase/", call_kwargs["success_url"])
+        self.assertIn("/admin/ourlives/appsettings/purchase/", call_kwargs["cancel_url"])
+        self.assertEqual(url, "https://checkout.stripe.com/test")
+
+
+from django.test.utils import override_settings
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class PurchaseViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.purchase_url = "/admin/ourlives/appsettings/purchase/"
+
+    def _create_ourlives_user(self):
+        user = User.objects.create_user("op", "op@test.com", "password", is_staff=True)
+        user.user_permissions.add(
+            Permission.objects.get(content_type__app_label="ourlives", codename="view_project")
+        )
+        return user
+
+    def test_ourlives_user_gets_200(self):
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        response = self.client.get(self.purchase_url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_non_ourlives_user_gets_403(self):
+        user = User.objects.create_user("noop", "noop@test.com", "password", is_staff=True)
+        self.client.force_login(user)
+        response = self.client.get(self.purchase_url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_unconfigured_pricing_shows_disabled_state(self):
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("0")
+        settings.min_purchase_amount = D("0")
+        settings.save()
+        response = self.client.get(self.purchase_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pricing is not configured")
+
+    def test_configured_pricing_shows_active_form(self):
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("0.10")
+        settings.min_purchase_amount = D("5.00")
+        settings.save()
+        response = self.client.get(self.purchase_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Price per token")
+        self.assertContains(response, "0.10")
+
+
+class CreateCheckoutViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.url = "/stripe/create-checkout/"
+
+    def _create_ourlives_user(self):
+        user = User.objects.create_user("op", "op@test.com", "password", is_staff=True)
+        user.user_permissions.add(
+            Permission.objects.get(content_type__app_label="ourlives", codename="view_project")
+        )
+        return user
+
+    def _configure_pricing(self):
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("0.10")
+        settings.min_purchase_amount = D("5.00")
+        settings.save()
+
+    def test_non_ourlives_user_gets_403(self):
+        user = User.objects.create_user("noop", "noop@test.com", "password", is_staff=True)
+        self.client.force_login(user)
+        response = self.client.post(self.url, {"amount": "10.00"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_rejects_amount_below_minimum(self):
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        self._configure_pricing()
+        response = self.client.post(self.url, {"amount": "1.00"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_rejects_when_price_not_configured(self):
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        response = self.client.post(self.url, {"amount": "10.00"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Price must be configured first", response.json().get("error", ""))
+
+    def test_rejects_amount_too_low_for_one_token(self):
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("1.50")
+        settings.min_purchase_amount = D("0")
+        settings.save()
+        response = self.client.post(self.url, {"amount": "1.00"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Amount too low", response.json().get("error", ""))
+
+    @patch("ourlives.stripe.stripe.checkout.Session.create")
+    def test_successful_checkout_redirects(self, mock_create):
+        mock_create.return_value = type("Session", (), {"url": "https://checkout.stripe.com/test"})()
+        user = self._create_ourlives_user()
+        self.client.force_login(user)
+        self._configure_pricing()
+        response = self.client.post(self.url, {"amount": "10.00"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "https://checkout.stripe.com/test")
+
+
+class StripeEventModelTests(TestCase):
+    def test_create_stripe_event_with_minimal_fields(self):
+        event = StripeEvent.objects.create(
+            stripe_event_id="evt_test_123",
+            source="ourlives",
+            token_count=100,
+            amount_cents=1000,
+        )
+        self.assertEqual(event.stripe_event_id, "evt_test_123")
+        self.assertEqual(event.source, "ourlives")
+        self.assertEqual(event.token_count, 100)
+        self.assertEqual(event.amount_cents, 1000)
+
+    def test_duplicate_stripe_event_id_raises_error(self):
+        StripeEvent.objects.create(
+            stripe_event_id="evt_test_123",
+            source="ourlives",
+            token_count=100,
+            amount_cents=1000,
+        )
+        with self.assertRaises(IntegrityError):
+            StripeEvent.objects.create(
+                stripe_event_id="evt_test_123",
+                source="ourlives",
+                token_count=50,
+                amount_cents=500,
+            )
+
+    def test_source_field_saves_correctly(self):
+        event = StripeEvent.objects.create(
+            stripe_event_id="evt_test_456",
+            source="ourlives",
+            token_count=200,
+            amount_cents=2000,
+        )
+        self.assertEqual(event.source, "ourlives")
+
+    def test_str_representation(self):
+        event = StripeEvent.objects.create(
+            stripe_event_id="evt_test_789",
+            source="ourlives",
+            token_count=50,
+            amount_cents=500,
+        )
+        self.assertEqual(str(event), "ourlives:evt_test_789")
+
+
+class WebhookViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.url = "/stripe/webhook/"
+        self.settings = AppSettings.get_solo()
+        self.settings.total_tokens = 100
+        self.settings.save()
+
+    def _build_valid_payload(self, event_id="evt_test_001", source="ourlives", token_count="50", app_settings_id=None, amount_total=1000):
+        if app_settings_id is None:
+            app_settings_id = self.settings.pk
+        return json.dumps({
+            "id": event_id,
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "metadata": {
+                        "source": source,
+                        "token_count": token_count,
+                        "app_settings_id": str(app_settings_id),
+                    },
+                    "amount_total": amount_total,
+                },
+            },
+        })
+
+    def _send_webhook(self, payload, sig_header="test_sig"):
+        return self.client.post(
+            self.url,
+            data=payload,
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE=sig_header,
+        )
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_valid_event_increments_tokens(self, mock_verify):
+        mock_verify.return_value = json.loads(self._build_valid_payload())
+        response = self._send_webhook(self._build_valid_payload())
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 150)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_duplicate_event_is_idempotent(self, mock_verify):
+        payload_data = self._build_valid_payload()
+        mock_verify.return_value = json.loads(payload_data)
+        self._send_webhook(payload_data)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 150)
+        response = self._send_webhook(payload_data)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 150)
+
+    def test_missing_signature_returns_400(self):
+        response = self.client.post(
+            self.url,
+            data=self._build_valid_payload(),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_wrong_content_type_returns_400(self):
+        response = self.client.post(
+            self.url,
+            data=self._build_valid_payload(),
+            content_type="text/plain",
+            HTTP_STRIPE_SIGNATURE="test_sig",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_unknown_source_logs_warning_returns_200(self, mock_verify):
+        payload = self._build_valid_payload(source="unknown_app")
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 100)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_missing_source_metadata_returns_200(self, mock_verify):
+        payload = json.dumps({
+            "id": "evt_test_no_source",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "metadata": {},
+                    "amount_total": 1000,
+                },
+            },
+        })
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 100)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_unhandled_event_type_returns_200(self, mock_verify):
+        payload = json.dumps({
+            "id": "evt_test_unhandled",
+            "type": "charge.succeeded",
+            "data": {"object": {}},
+        })
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 100)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_app_settings_id_mismatch_still_applies_tokens(self, mock_verify):
+        payload = self._build_valid_payload(event_id="evt_test_mismatch", app_settings_id=99999)
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 150)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_dispatches_ourlives_source_to_handler(self, mock_verify):
+        payload = self._build_valid_payload(event_id="evt_test_dispatch")
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.total_tokens, 150)

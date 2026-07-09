@@ -171,6 +171,10 @@ DATE_FORMAT = "d/b/Y"
 TIME_FORMAT = "H:i"
 DATETIME_FORMAT = f"{DATE_FORMAT} {TIME_FORMAT}"
 
+# Stripe
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
 # Storage
 STORAGE_AWS = os.getenv("STORAGE_AWS") == "True"
 
@@ -248,7 +252,20 @@ UNFOLD = {
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": True,
-        "navigation": [],
+        "navigation": [
+            {
+                "title": "Credits",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Purchase Credits",
+                        "icon": "shopping_cart",
+                        "link": "/admin/ourlives/appsettings/purchase/",
+                        "permission": "ourlives.admin.can_purchase",
+                    },
+                ],
+            },
+        ],
 
     },
 }

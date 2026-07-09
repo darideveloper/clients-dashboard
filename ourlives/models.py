@@ -1,5 +1,7 @@
 import uuid
 
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from solo.models import SingletonModel
@@ -126,6 +128,18 @@ class AppSettings(SingletonModel):
         default=0,
         help_text="Maximum number of tokens available across all invitation codes",
     )
+    price_per_token = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Price per token in USD. Set to 0 to disable purchasing.",
+    )
+    min_purchase_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Minimum purchase amount in USD. Set to 0 for no minimum.",
+    )
 
     class Meta:
         verbose_name = "App Settings"
@@ -141,6 +155,14 @@ class AppSettings(SingletonModel):
                     f"below currently assigned tokens "
                     f"({self.tokens_assigned})"
                 ),
+            })
+        if self.price_per_token is not None and self.price_per_token < Decimal("0"):
+            raise ValidationError({
+                "price_per_token": "Price per token cannot be negative.",
+            })
+        if self.min_purchase_amount is not None and self.min_purchase_amount < Decimal("0"):
+            raise ValidationError({
+                "min_purchase_amount": "Minimum purchase amount cannot be negative.",
             })
 
     def save(self, *args, **kwargs):
@@ -162,3 +184,78 @@ class AppSettings(SingletonModel):
     @property
     def tokens_available(self):
         return self.total_tokens - self.tokens_assigned
+
+
+class StripeEvent(models.Model):
+    stripe_event_id = models.CharField(max_length=255, unique=True)
+    source = models.CharField(max_length=50)
+    token_count = models.PositiveIntegerField()
+    amount_cents = models.PositiveIntegerField(
+        help_text="Amount in smallest currency units (cents for USD) from Stripe event payload",
+    )
+    handled_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Stripe Event"
+        verbose_name_plural = "Stripe Events"
+
+    def __str__(self):
+        return f"{self.source}:{self.stripe_event_id}"
+
+
+def calculate_token_count(amount, price_per_token):
+    from decimal import Decimal
+    if price_per_token == Decimal("0"):
+        return 0
+    return int(amount // price_per_token)
+
+
+def process_ourlives_checkout_completion(stripe_event_data):
+    import logging
+
+    from django.db import transaction
+
+    logger = logging.getLogger(__name__)
+
+    session = stripe_event_data["data"]["object"]
+    metadata = session.get("metadata", {})
+
+    if not metadata or "source" not in metadata:
+        logger.warning("Webhook event missing 'source' metadata, skipping")
+        return False
+
+    source = metadata.get("source")
+    token_count = int(metadata.get("token_count", 0))
+    app_settings_id = metadata.get("app_settings_id")
+    stripe_event_id = stripe_event_data.get("id")
+    amount_cents = session.get("amount_total", 0)
+
+    if source != "ourlives":
+        logger.warning("Unknown source '%s', skipping", source)
+        return False
+
+    if StripeEvent.objects.filter(stripe_event_id=stripe_event_id).exists():
+        logger.info("Duplicate webhook event %s, skipping", stripe_event_id)
+        return False
+
+    with transaction.atomic():
+        settings = AppSettings.get_solo()
+
+        if app_settings_id and str(settings.pk) != str(app_settings_id):
+            logger.warning(
+                "app_settings_id mismatch: metadata=%s, current=%s. Using metadata token_count.",
+                app_settings_id, settings.pk,
+            )
+
+        locked = AppSettings.objects.select_for_update().get(pk=settings.pk)
+        locked.total_tokens += token_count
+        locked.save()
+
+        StripeEvent.objects.create(
+            stripe_event_id=stripe_event_id,
+            source=source,
+            token_count=token_count,
+            amount_cents=amount_cents,
+        )
+
+    return True
