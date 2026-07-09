@@ -276,7 +276,111 @@ class CreateCheckoutSessionTests(TestCase):
         self.assertEqual(url, "https://checkout.stripe.com/test")
 
 
+import io
+import tempfile
+
+from django.core.management import call_command
 from django.test.utils import override_settings
+
+
+class ImportInvitationCodesTests(TestCase):
+    def setUp(self):
+        self.project = Project.objects.create(name="ourlens")
+        AppSettings.get_solo()
+        AppSettings.objects.update(total_tokens=100)
+
+    def _write_csv(self, lines):
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
+        f.write("code,is_active,max_use_rate,current_use_rate\n")
+        f.writelines(lines)
+        f.close()
+        return f.name
+
+    def test_happy_path_bulk_import(self):
+        csv_path = self._write_csv([
+            "ABC001,true,10,0\n",
+            "ABC002,True,5,2\n",
+        ])
+        out = io.StringIO()
+        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        self.assertIn("2 created", out.getvalue())
+        self.assertEqual(InvitationCode.objects.count(), 2)
+
+    def test_project_not_found(self):
+        csv_path = self._write_csv(["X,true,5,0\n"])
+        with self.assertRaisesMessage(Exception, "Project 'ghost' not found"):
+            call_command("import_invitation_codes", project="ghost", csv=csv_path)
+
+    def test_csv_file_not_found(self):
+        with self.assertRaisesRegex(Exception, "CSV file not found"):
+            call_command("import_invitation_codes", project="ourlens", csv="/no/such/file.csv")
+
+    def test_missing_required_columns(self):
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+        f.write("code,is_active\nX,true\n")
+        f.close()
+        with self.assertRaisesRegex(Exception, "missing required columns"):
+            call_command("import_invitation_codes", project="ourlens", csv=f.name)
+
+    def test_rejects_non_integer_max_use(self):
+        csv_path = self._write_csv(["X,true,notanint,0\n"])
+        with self.assertRaisesRegex(Exception, "invalid row"):
+            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+
+    def test_rejects_non_boolean_is_active(self):
+        csv_path = self._write_csv(["X,banana,5,0\n"])
+        with self.assertRaisesRegex(Exception, "invalid row"):
+            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+
+    def test_rejects_current_exceeds_max(self):
+        csv_path = self._write_csv(["X,true,5,10\n"])
+        with self.assertRaisesRegex(Exception, "invalid row"):
+            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+
+    def test_rejects_max_use_zero(self):
+        csv_path = self._write_csv(["X,true,0,0\n"])
+        with self.assertRaisesRegex(Exception, "invalid row"):
+            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+
+    def test_token_pool_auto_bump(self):
+        AppSettings.objects.update(total_tokens=10)
+        csv_path = self._write_csv([
+            "A,true,10,0\n",
+            "B,true,10,0\n",
+        ])
+        out = io.StringIO()
+        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        self.assertIn("bumped", out.getvalue())
+        self.assertEqual(AppSettings.get_solo().total_tokens, 20)
+
+    def test_token_pool_sufficient_no_bump(self):
+        AppSettings.objects.update(total_tokens=50)
+        csv_path = self._write_csv(["A,true,10,0\n"])
+        out = io.StringIO()
+        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        self.assertIn("sufficient", out.getvalue())
+        self.assertEqual(AppSettings.get_solo().total_tokens, 50)
+
+    def test_idempotent_re_run_overwrites_existing(self):
+        csv_path = self._write_csv(["A,true,10,0\n"])
+        call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+        self.assertEqual(InvitationCode.objects.count(), 1)
+        out = io.StringIO()
+        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        self.assertIn("updated", out.getvalue())
+        self.assertIn("1 updated", out.getvalue())
+        self.assertEqual(InvitationCode.objects.count(), 1)
+
+    def test_api_token_column_ignored(self):
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, newline="")
+        f.write("code,is_active,max_use_rate,current_use_rate,api_token\n")
+        f.write("A,true,5,0,sk-or-v1-abc123\n")
+        f.close()
+        out = io.StringIO()
+        call_command("import_invitation_codes", project="ourlens", csv=f.name, stdout=out)
+        self.assertIn("1 created", out.getvalue())
+        self.assertEqual(InvitationCode.objects.count(), 1)
+
 
 
 @override_settings(STORAGES={
