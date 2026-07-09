@@ -1,5 +1,6 @@
 import json
 import logging
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib import messages as django_messages
@@ -56,7 +57,12 @@ def create_checkout(request):
             status=400,
         )
 
-    purchase_url = request.build_absolute_uri("/admin/ourlives/appsettings/purchase/")
+    referer = request.META.get("HTTP_REFERER", "")
+    if referer:
+        parsed = urlparse(referer)
+        purchase_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    else:
+        purchase_url = request.build_absolute_uri("/admin/ourlives/appsettings/purchase/")
     checkout_url = create_checkout_session(
         amount_usd=amount,
         token_count=token_count,
