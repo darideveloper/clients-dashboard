@@ -1,7 +1,8 @@
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
-from django.shortcuts import render
-from django.urls import path
+from django.shortcuts import redirect, render
+from django.urls import path, reverse
+from django.utils.html import format_html
 from solo.admin import SingletonModelAdmin
 
 from project.admin_base import ModelAdminUnfoldBase
@@ -52,6 +53,9 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
         ("Pricing", {
             "fields": ("price_per_token", "min_purchase_amount"),
         }),
+        ("Stripe", {
+            "fields": ("stripe_product_id", "stripe_price_id", "sync_stripe_price_link"),
+        }),
         ("Status", {
             "fields": (
                 "tokens_assigned_display",
@@ -61,6 +65,9 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
         }),
     )
     readonly_fields = (
+        "stripe_product_id",
+        "stripe_price_id",
+        "sync_stripe_price_link",
         "tokens_assigned_display",
         "tokens_used_display",
         "tokens_available_display",
@@ -78,12 +85,33 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
     def tokens_available_display(self, obj):
         return obj.tokens_available
 
+    @admin.display(description="Stripe Price Sync")
+    def sync_stripe_price_link(self, obj):
+        if not self.request.user.is_superuser:
+            return "-"
+        url = reverse("admin:sync-stripe-price")
+        return format_html('<a href="{}" class="bg-primary-600 border border-transparent cursor-pointer font-medium inline-flex items-center px-3 py-2 rounded-default text-white hover:bg-primary-600/80">Run Sync Stripe Price</a>', url)
+
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
             path("purchase/", self.admin_site.admin_view(self.purchase_view), name="ourlives_appsettings_purchase"),
+            path("sync-stripe-price/", self.admin_site.admin_view(self.sync_stripe_price_view), name="sync-stripe-price"),
         ]
         return custom_urls + urls
+
+    def sync_stripe_price_view(self, request):
+        if not request.user.is_superuser:
+            from django.http import HttpResponseForbidden
+            return HttpResponseForbidden("Access denied")
+
+        from django.core.management import call_command
+        from io import StringIO
+
+        out = StringIO()
+        call_command("sync_stripe_price", stdout=out)
+        messages.success(request, out.getvalue())
+        return redirect("admin:ourlives_appsettings_change")
 
     def purchase_view(self, request):
         if not request.user.has_module_perms("ourlives"):
@@ -99,7 +127,7 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
             "min_purchase_amount": float(settings.min_purchase_amount) if settings.min_purchase_amount else 0,
             "total_tokens": settings.total_tokens,
             "tokens_available": settings.tokens_available,
-            "is_configured": settings.price_per_token and settings.price_per_token > 0,
+            "is_configured": settings.price_per_token is not None and settings.price_per_token > 0,
         }
         return render(request, "admin/ourlives/purchase.html", context)
 
@@ -107,8 +135,9 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
 @admin.register(StripeEvent)
 class StripeEventAdmin(ModelAdminUnfoldBase):
     sidebar_icon = "receipt_long"
-    list_display = ("stripe_event_id", "source", "token_count", "amount_cents", "handled_at")
-    readonly_fields = ("stripe_event_id", "source", "token_count", "amount_cents", "handled_at")
+    list_display = ("stripe_event_id", "source", "token_count", "amount_cents", "presentment_currency", "presentment_amount", "handled_at")
+    list_filter = ("presentment_currency",)
+    readonly_fields = ("stripe_event_id", "source", "token_count", "amount_cents", "presentment_currency", "presentment_amount", "handled_at")
 
     def has_add_permission(self, request):
         return False

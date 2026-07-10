@@ -140,6 +140,16 @@ class AppSettings(SingletonModel):
         default=0,
         help_text="Minimum purchase amount in USD. Set to 0 for no minimum.",
     )
+    stripe_product_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Stripe Product ID (e.g., 'prod_xxxxx'). Auto-populated by sync_stripe_price command.",
+    )
+    stripe_price_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Stripe Price ID (e.g., 'price_xxxxx'). Auto-populated by sync_stripe_price command.",
+    )
 
     class Meta:
         verbose_name = "App Settings"
@@ -191,7 +201,17 @@ class StripeEvent(models.Model):
     source = models.CharField(max_length=50)
     token_count = models.PositiveIntegerField()
     amount_cents = models.PositiveIntegerField(
-        help_text="Amount in smallest currency units (cents for USD) from Stripe event payload",
+        help_text="Settlement amount in smallest currency units (cents for USD) from Stripe event payload",
+    )
+    presentment_currency = models.CharField(
+        max_length=3,
+        blank=True,
+        help_text="ISO 4217 currency code (e.g., 'eur', 'gbp') that the customer saw at checkout",
+    )
+    presentment_amount = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Amount in customer's currency smallest unit (e.g., cents for EUR) from presentment_details",
     )
     handled_at = models.DateTimeField(auto_now_add=True)
 
@@ -219,6 +239,7 @@ def process_ourlives_checkout_completion(stripe_event_data):
 
     session = stripe_event_data["data"]["object"]
     metadata = session.get("metadata", {})
+    presentment_details = session.get("presentment_details", {}) or {}
 
     if not metadata or "source" not in metadata:
         logger.warning("Webhook event missing 'source' metadata, skipping")
@@ -256,6 +277,8 @@ def process_ourlives_checkout_completion(stripe_event_data):
             source=source,
             token_count=token_count,
             amount_cents=amount_cents,
+            presentment_currency=presentment_details.get("presentment_currency", ""),
+            presentment_amount=presentment_details.get("presentment_amount"),
         )
 
     return True

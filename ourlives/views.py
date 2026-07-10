@@ -1,5 +1,6 @@
 import json
 import logging
+from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -26,8 +27,8 @@ def create_checkout(request):
         data = request.POST
 
     try:
-        amount = float(data.get("amount", 0))
-    except (TypeError, ValueError):
+        amount = Decimal(data.get("amount", "0"))
+    except (TypeError, ValueError, ArithmeticError):
         return JsonResponse({"error": "Invalid amount"}, status=400)
 
     if amount <= 0:
@@ -38,22 +39,17 @@ def create_checkout(request):
     if settings_obj.price_per_token is None or settings_obj.price_per_token <= 0:
         return JsonResponse({"error": "Price must be configured first"}, status=400)
 
-    min_amount = float(settings_obj.min_purchase_amount)
-    if min_amount > 0 and amount < min_amount:
+    if settings_obj.min_purchase_amount > 0 and amount < settings_obj.min_purchase_amount:
         return JsonResponse(
-            {"error": f"Minimum purchase amount is ${min_amount:.2f}"},
+            {"error": f"Minimum purchase amount is ${settings_obj.min_purchase_amount:.2f}"},
             status=400,
         )
 
-    from decimal import Decimal
-    token_count = calculate_token_count(
-        Decimal(str(amount)),
-        settings_obj.price_per_token,
-    )
+    token_count = calculate_token_count(amount, settings_obj.price_per_token)
 
     if token_count < 1:
         return JsonResponse(
-            {"error": f"Amount too low. Minimum ${float(settings_obj.price_per_token):.2f} required for 1 token"},
+            {"error": f"Amount too low. Minimum ${settings_obj.price_per_token:.2f} required for 1 token"},
             status=400,
         )
 
@@ -63,12 +59,14 @@ def create_checkout(request):
         purchase_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
     else:
         purchase_url = request.build_absolute_uri("/admin/ourlives/appsettings/purchase/")
+    unit_amount_cents = int(settings_obj.price_per_token * 100)
     checkout_url = create_checkout_session(
-        amount_usd=amount,
-        token_count=token_count,
+        unit_amount_cents=unit_amount_cents,
+        quantity=token_count,
         app_settings_id=settings_obj.pk,
         success_url=purchase_url,
         cancel_url=purchase_url,
+        customer_email=request.user.email or "",
     )
 
     return redirect(checkout_url)

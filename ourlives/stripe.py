@@ -9,31 +9,34 @@ def configure_stripe():
 configure_stripe()
 
 
-def create_checkout_session(amount_usd, token_count, app_settings_id, success_url, cancel_url):
-    amount_cents = int(amount_usd * 100)
-
-    session = stripe.checkout.Session.create(
-        line_items=[
+def create_checkout_session(unit_amount_cents, quantity, app_settings_id, success_url, cancel_url, customer_email=""):
+    session_params = {
+        "payment_method_types": [],
+        "line_items": [
             {
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {
-                        "name": f"{token_count} Invitation Code Tokens",
-                    },
-                    "unit_amount": amount_cents,
+                    "product_data": {"name": "Invitation Code Tokens"},
+                    "unit_amount": unit_amount_cents,
                 },
-                "quantity": 1,
+                "quantity": quantity,
             },
         ],
-        mode="payment",
-        success_url=success_url,
-        cancel_url=cancel_url,
-        metadata={
+        "mode": "payment",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "adaptive_pricing": {"enabled": True},
+        "metadata": {
             "source": "ourlives",
-            "token_count": str(token_count),
+            "token_count": str(quantity),
             "app_settings_id": str(app_settings_id),
         },
-    )
+    }
+
+    if customer_email:
+        session_params["customer_email"] = customer_email
+
+    session = stripe.checkout.Session.create(**session_params)
 
     return session.url
 

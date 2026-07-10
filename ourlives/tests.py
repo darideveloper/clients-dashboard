@@ -251,23 +251,35 @@ class CanPurchaseTests(TestCase):
 
 class CreateCheckoutSessionTests(TestCase):
     @patch("ourlives.stripe.stripe.checkout.Session.create")
-    def test_create_checkout_session_correct_metadata(self, mock_create):
+    def test_create_checkout_session_correct_params(self, mock_create):
         mock_create.return_value = type("Session", (), {"url": "https://checkout.stripe.com/test"})()
 
         from ourlives.stripe import create_checkout_session
 
         url = create_checkout_session(
-            amount_usd=10.00,
-            token_count=100,
+            unit_amount_cents=10,
+            quantity=20,
             app_settings_id=1,
             success_url="https://example.com/admin/ourlives/appsettings/purchase/",
             cancel_url="https://example.com/admin/ourlives/appsettings/purchase/",
+            customer_email="test@example.com",
         )
 
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args[1]
+
+        self.assertEqual(call_kwargs["payment_method_types"], ["card"])
+        self.assertEqual(call_kwargs["customer_email"], "test@example.com")
+        self.assertEqual(call_kwargs["adaptive_pricing"], {"enabled": True})
+
+        line_items = call_kwargs["line_items"]
+        self.assertEqual(line_items[0]["price_data"]["currency"], "usd")
+        self.assertEqual(line_items[0]["price_data"]["unit_amount"], 10)
+        self.assertEqual(line_items[0]["price_data"]["product_data"]["name"], "Invitation Code Tokens")
+        self.assertEqual(line_items[0]["quantity"], 20)
+
         self.assertEqual(call_kwargs["metadata"]["source"], "ourlives")
-        self.assertEqual(call_kwargs["metadata"]["token_count"], "100")
+        self.assertEqual(call_kwargs["metadata"]["token_count"], "20")
         self.assertEqual(call_kwargs["metadata"]["app_settings_id"], "1")
         self.assertIn("success_url", call_kwargs)
         self.assertIn("cancel_url", call_kwargs)
@@ -417,10 +429,11 @@ class PurchaseViewTests(TestCase):
         settings = AppSettings.get_solo()
         settings.price_per_token = D("0")
         settings.min_purchase_amount = D("0")
+        settings.stripe_price_id = ""
         settings.save()
         response = self.client.get(self.purchase_url)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Pricing is not configured")
+        self.assertContains(response, "Price not configured")
 
     def test_configured_pricing_shows_active_form(self):
         user = self._create_ourlives_user()
@@ -428,6 +441,7 @@ class PurchaseViewTests(TestCase):
         settings = AppSettings.get_solo()
         settings.price_per_token = D("0.10")
         settings.min_purchase_amount = D("5.00")
+        settings.stripe_price_id = "price_test_abc"
         settings.save()
         response = self.client.get(self.purchase_url)
         self.assertEqual(response.status_code, 200)
@@ -451,6 +465,7 @@ class CreateCheckoutViewTests(TestCase):
         settings = AppSettings.get_solo()
         settings.price_per_token = D("0.10")
         settings.min_purchase_amount = D("5.00")
+        settings.stripe_price_id = "price_test_abc"
         settings.save()
 
     def test_non_ourlives_user_gets_403(self):
@@ -480,6 +495,7 @@ class CreateCheckoutViewTests(TestCase):
         settings = AppSettings.get_solo()
         settings.price_per_token = D("1.50")
         settings.min_purchase_amount = D("0")
+        settings.stripe_price_id = "price_test_abc"
         settings.save()
         response = self.client.post(self.url, {"amount": "1.00"})
         self.assertEqual(response.status_code, 400)
@@ -494,6 +510,15 @@ class CreateCheckoutViewTests(TestCase):
         response = self.client.post(self.url, {"amount": "10.00"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, "https://checkout.stripe.com/test")
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args[1]
+        self.assertEqual(call_kwargs["payment_method_types"], ["card"])
+        self.assertEqual(call_kwargs["customer_email"], "op@test.com")
+        self.assertEqual(call_kwargs["adaptive_pricing"], {"enabled": True})
+        line_items = call_kwargs["line_items"]
+        self.assertEqual(line_items[0]["price_data"]["currency"], "usd")
+        self.assertEqual(line_items[0]["price_data"]["unit_amount"], 10)
+        self.assertEqual(line_items[0]["quantity"], 100)
 
 
 class StripeEventModelTests(TestCase):
@@ -508,6 +533,30 @@ class StripeEventModelTests(TestCase):
         self.assertEqual(event.source, "ourlives")
         self.assertEqual(event.token_count, 100)
         self.assertEqual(event.amount_cents, 1000)
+        self.assertEqual(event.presentment_currency, "")
+        self.assertIsNone(event.presentment_amount)
+
+    def test_create_stripe_event_with_presentment_details(self):
+        event = StripeEvent.objects.create(
+            stripe_event_id="evt_test_456",
+            source="ourlives",
+            token_count=50,
+            amount_cents=1000,
+            presentment_currency="eur",
+            presentment_amount=920,
+        )
+        self.assertEqual(event.presentment_currency, "eur")
+        self.assertEqual(event.presentment_amount, 920)
+
+    def test_presentment_fields_are_optional(self):
+        event = StripeEvent.objects.create(
+            stripe_event_id="evt_test_789",
+            source="ourlives",
+            token_count=25,
+            amount_cents=500,
+        )
+        self.assertEqual(event.presentment_currency, "")
+        self.assertIsNone(event.presentment_amount)
 
     def test_duplicate_stripe_event_id_raises_error(self):
         StripeEvent.objects.create(
@@ -551,10 +600,10 @@ class WebhookViewTests(TestCase):
         self.settings.total_tokens = 100
         self.settings.save()
 
-    def _build_valid_payload(self, event_id="evt_test_001", source="ourlives", token_count="50", app_settings_id=None, amount_total=1000):
+    def _build_valid_payload(self, event_id="evt_test_001", source="ourlives", token_count="50", app_settings_id=None, amount_total=1000, presentment_currency=None, presentment_amount=None):
         if app_settings_id is None:
             app_settings_id = self.settings.pk
-        return json.dumps({
+        data = {
             "id": event_id,
             "type": "checkout.session.completed",
             "data": {
@@ -567,7 +616,13 @@ class WebhookViewTests(TestCase):
                     "amount_total": amount_total,
                 },
             },
-        })
+        }
+        if presentment_currency and presentment_amount is not None:
+            data["data"]["object"]["presentment_details"] = {
+                "presentment_currency": presentment_currency,
+                "presentment_amount": presentment_amount,
+            }
+        return json.dumps(data)
 
     def _send_webhook(self, payload, sig_header="test_sig"):
         return self.client.post(
@@ -671,3 +726,111 @@ class WebhookViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.settings.refresh_from_db()
         self.assertEqual(self.settings.total_tokens, 150)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_webhook_stores_presentment_details(self, mock_verify):
+        payload = self._build_valid_payload(
+            event_id="evt_test_presentment",
+            presentment_currency="eur",
+            presentment_amount=920,
+        )
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        event = StripeEvent.objects.get(stripe_event_id="evt_test_presentment")
+        self.assertEqual(event.presentment_currency, "eur")
+        self.assertEqual(event.presentment_amount, 920)
+
+    @patch("ourlives.views.verify_webhook_signature")
+    def test_webhook_handles_missing_presentment_details(self, mock_verify):
+        payload = self._build_valid_payload(event_id="evt_test_no_presentment")
+        mock_verify.return_value = json.loads(payload)
+        response = self._send_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        event = StripeEvent.objects.get(stripe_event_id="evt_test_no_presentment")
+        self.assertEqual(event.presentment_currency, "")
+        self.assertIsNone(event.presentment_amount)
+
+
+class SyncStripePriceCommandTests(TestCase):
+    @patch("stripe.Product.create")
+    @patch("stripe.Price.create")
+    def test_creates_product_and_price(self, mock_price_create, mock_product_create):
+        mock_product = type("Product", (), {"id": "prod_test_123"})()
+        mock_product_create.return_value = mock_product
+        mock_price = type("Price", (), {"id": "price_test_123"})()
+        mock_price_create.return_value = mock_price
+
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("0.50")
+        settings.save()
+
+        out = io.StringIO()
+        call_command("sync_stripe_price", stdout=out)
+
+        self.assertIn("Created product: prod_test_123", out.getvalue())
+        self.assertIn("Price created: price_test_123", out.getvalue())
+
+        settings.refresh_from_db()
+        self.assertEqual(settings.stripe_product_id, "prod_test_123")
+        self.assertEqual(settings.stripe_price_id, "price_test_123")
+
+        mock_price_create.assert_called_once_with(
+            product="prod_test_123",
+            unit_amount=50,
+            currency="usd",
+        )
+
+    @patch("stripe.Product.create")
+    @patch("stripe.Price.create")
+    def test_arches_existing_price_on_re_run(self, mock_price_create, mock_product_create):
+        mock_product = type("Product", (), {"id": "prod_test_123"})()
+        mock_product_create.return_value = mock_product
+
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("0.50")
+        settings.stripe_product_id = "prod_test_123"
+        settings.stripe_price_id = "price_old_456"
+        settings.save()
+
+        with patch("stripe.Price.modify") as mock_modify:
+            mock_price = type("Price", (), {"id": "price_new_789"})()
+            mock_price_create.return_value = mock_price
+
+            out = io.StringIO()
+            call_command("sync_stripe_price", stdout=out)
+
+            self.assertIn("Archived old price: price_old_456", out.getvalue())
+            self.assertIn("Price created: price_new_789", out.getvalue())
+            mock_modify.assert_called_once_with("price_old_456", active=False)
+
+            settings.refresh_from_db()
+            self.assertEqual(settings.stripe_price_id, "price_new_789")
+
+    def test_skips_when_price_per_token_is_zero(self):
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("0")
+        settings.save()
+
+        out = io.StringIO()
+        call_command("sync_stripe_price", stdout=out)
+
+        self.assertIn("Skipping", out.getvalue())
+        self.assertIn("purchases disabled", out.getvalue())
+
+    @patch("stripe.Product.create")
+    @patch("stripe.Price.create")
+    def test_uses_existing_product_from_settings(self, mock_price_create, mock_product_create):
+        settings = AppSettings.get_solo()
+        settings.price_per_token = D("1.00")
+        settings.stripe_product_id = "prod_existing_123"
+        settings.save()
+
+        mock_price = type("Price", (), {"id": "price_test_456"})()
+        mock_price_create.return_value = mock_price
+
+        out = io.StringIO()
+        call_command("sync_stripe_price", stdout=out)
+
+        self.assertIn("Reusing product: prod_existing_123", out.getvalue())
+        mock_product_create.assert_not_called()
