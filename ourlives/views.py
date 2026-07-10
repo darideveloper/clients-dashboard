@@ -89,18 +89,20 @@ def webhook(request):
     if event is None:
         return HttpResponseBadRequest("Invalid signature")
 
-    event_type = event.get("type")
+    stripe_event_dict = event if isinstance(event, dict) else event.to_dict()
+
+    event_type = stripe_event_dict["type"]
     if event_type != "checkout.session.completed":
         logger.info("Ignoring unhandled event type: %s", event_type)
         return HttpResponse("OK")
 
-    stripe_event_id = event.get("id")
+    stripe_event_id = stripe_event_dict["id"]
     if StripeEvent.objects.filter(stripe_event_id=stripe_event_id).exists():
         logger.info("Duplicate event %s, skipping", stripe_event_id)
         return HttpResponse("OK")
 
     from ourlives.models import process_ourlives_checkout_completion
 
-    process_ourlives_checkout_completion(event)
+    process_ourlives_checkout_completion(stripe_event_dict)
 
     return HttpResponse("OK")
