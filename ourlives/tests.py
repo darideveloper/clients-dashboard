@@ -519,6 +519,8 @@ class CreateCheckoutViewTests(TestCase):
         self.assertEqual(line_items[0]["price_data"]["currency"], "usd")
         self.assertEqual(line_items[0]["price_data"]["unit_amount"], 10)
         self.assertEqual(line_items[0]["quantity"], 100)
+        self.assertIn("/stripe/success/?token_count=100&session_id=", call_kwargs["success_url"])
+        self.assertIn("/admin/ourlives/appsettings/purchase/", call_kwargs["cancel_url"])
 
 
 class StripeEventModelTests(TestCase):
@@ -834,3 +836,23 @@ class SyncStripePriceCommandTests(TestCase):
 
         self.assertIn("Reusing product: prod_existing_123", out.getvalue())
         mock_product_create.assert_not_called()
+
+
+class PaymentSuccessViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def test_payment_success_redirects_to_settings_with_token_count(self):
+        response = self.client.get("/stripe/success/", {"token_count": "50", "session_id": "cs_test_123"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("admin:ourlives_appsettings_change"))
+
+    def test_payment_success_redirects_without_token_count(self):
+        response = self.client.get("/stripe/success/", {"session_id": "cs_test_123"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("admin:ourlives_appsettings_change"))
+
+    def test_payment_success_redirects_without_params(self):
+        response = self.client.get("/stripe/success/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("admin:ourlives_appsettings_change"))

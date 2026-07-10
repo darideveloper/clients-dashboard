@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib import messages as django_messages
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -60,16 +61,34 @@ def create_checkout(request):
     else:
         purchase_url = request.build_absolute_uri("/admin/ourlives/appsettings/purchase/")
     unit_amount_cents = int(settings_obj.price_per_token * 100)
+    success_url = request.build_absolute_uri(
+        reverse("payment_success") + f"?token_count={token_count}&session_id={{CHECKOUT_SESSION_ID}}"
+    )
     checkout_url = create_checkout_session(
         unit_amount_cents=unit_amount_cents,
         quantity=token_count,
         app_settings_id=settings_obj.pk,
-        success_url=purchase_url,
+        success_url=success_url,
         cancel_url=purchase_url,
         customer_email=request.user.email or "",
     )
 
     return redirect(checkout_url)
+
+
+def payment_success(request):
+    token_count = request.GET.get("token_count")
+    session_id = request.GET.get("session_id")
+
+    if token_count:
+        django_messages.success(
+            request,
+            f"Payment successful! {token_count} credits added.",
+        )
+    else:
+        django_messages.success(request, "Payment completed successfully!")
+
+    return redirect("admin:ourlives_appsettings_change")
 
 
 @csrf_exempt
