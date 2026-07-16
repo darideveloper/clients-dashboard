@@ -36,5 +36,8 @@ docs/
 .*/
 clients
 
+# client delivery doc (internal, not shipped)
+CLIENT.md
+
 # data files
 *.csv
