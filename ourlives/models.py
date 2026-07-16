@@ -27,11 +27,27 @@ class Project(models.Model):
         return self.name
 
 
+class Organization(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Organization"
+        verbose_name_plural = "Organizations"
+
+    def __str__(self):
+        return self.name
+
+
 class InvitationCode(models.Model):
     project = models.ForeignKey(
         Project,
         on_delete=models.PROTECT,
         related_name="invitation_codes",
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.PROTECT,
     )
     code = models.CharField(
         max_length=50,

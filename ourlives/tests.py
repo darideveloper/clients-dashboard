@@ -5,10 +5,11 @@ from unittest.mock import patch
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from django.db.models.deletion import ProtectedError
 from django.test import TestCase, Client
 from django.urls import reverse
 
-from ourlives.models import AppSettings, InvitationCode, Project, StripeEvent, calculate_token_count
+from ourlives.models import AppSettings, InvitationCode, Organization, Project, StripeEvent, calculate_token_count
 
 
 class ProjectTests(TestCase):
@@ -24,16 +25,30 @@ class ProjectTests(TestCase):
             Project.objects.create(name="Launch Alpha")
 
 
+class OrganizationTests(TestCase):
+    def test_create_organization(self):
+        org = Organization.objects.create(name="Acme Corp", description="Billing entity")
+        self.assertEqual(org.name, "Acme Corp")
+        self.assertEqual(org.description, "Billing entity")
+        self.assertEqual(str(org), "Acme Corp")
+
+    def test_duplicate_organization_name_raises_error(self):
+        Organization.objects.create(name="Acme Corp")
+        with self.assertRaises(IntegrityError):
+            Organization.objects.create(name="Acme Corp")
+
+
 class InvitationCodeBaseTestCase(TestCase):
     def setUp(self):
         self.project = Project.objects.create(name="Test Project")
+        self.organization = Organization.objects.create(name="Test Org")
         AppSettings.get_solo()
         AppSettings.objects.update(total_tokens=100)
 
 
 class InvitationCodeCreationTests(InvitationCodeBaseTestCase):
     def test_create_invitation_code_with_auto_generated_code(self):
-        code = InvitationCode.objects.create(project=self.project, max_use=10)
+        code = InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=10)
         self.assertIsNotNone(code.code)
         self.assertNotEqual(code.code, "")
         self.assertTrue(code.is_active)
@@ -42,20 +57,26 @@ class InvitationCodeCreationTests(InvitationCodeBaseTestCase):
         self.assertEqual(str(code), code.code)
 
     def test_create_code_within_pool_limit(self):
-        code = InvitationCode.objects.create(project=self.project, max_use=10)
+        code = InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=10)
         self.assertIsNotNone(code.pk)
 
     def test_create_code_exceeding_pool_limit(self):
-        InvitationCode.objects.create(project=self.project, max_use=100)
+        InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=100)
         with self.assertRaises(ValidationError):
-            InvitationCode.objects.create(project=self.project, max_use=1)
+            InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=1)
+
+    def test_protect_organization_with_active_codes(self):
+        org = Organization.objects.create(name="Protected Org")
+        InvitationCode.objects.create(project=self.project, organization=org, max_use=5)
+        with self.assertRaises(ProtectedError):
+            org.delete()
 
 
 class InvitationCodeUpdateTests(InvitationCodeBaseTestCase):
     def setUp(self):
         super().setUp()
         self.code = InvitationCode.objects.create(
-            project=self.project, max_use=10, current_use=3,
+            project=self.project, organization=self.organization, max_use=10, current_use=3,
         )
 
     def test_update_increasing_max_use_within_limit(self):
@@ -66,7 +87,7 @@ class InvitationCodeUpdateTests(InvitationCodeBaseTestCase):
 
     def test_update_increasing_max_use_beyond_limit(self):
         other = Project.objects.create(name="Other")
-        InvitationCode.objects.create(project=other, max_use=90)
+        InvitationCode.objects.create(project=other, organization=self.organization, max_use=90)
         self.code.max_use = 11
         with self.assertRaises(ValidationError):
             self.code.save()
@@ -94,7 +115,7 @@ class InvitationCodeUpdateTests(InvitationCodeBaseTestCase):
         other = Project.objects.create(name="Other")
         self.code.max_use = 3
         self.code.save()
-        InvitationCode.objects.create(project=other, max_use=97)
+        InvitationCode.objects.create(project=other, organization=self.organization, max_use=97)
         self.code.max_use = 10
         self.code.is_active = True
         with self.assertRaises(ValidationError):
@@ -103,14 +124,15 @@ class InvitationCodeUpdateTests(InvitationCodeBaseTestCase):
 
 class AppSettingsTests(TestCase):
     def setUp(self):
+        self.organization = Organization.objects.create(name="Test Org")
         AppSettings.get_solo()
         AppSettings.objects.update(total_tokens=100)
 
     def test_computed_properties(self):
         project = Project.objects.create(name="Test")
-        InvitationCode.objects.create(project=project, max_use=5, current_use=3)
-        InvitationCode.objects.create(project=project, max_use=5, current_use=3)
-        InvitationCode.objects.create(project=project, max_use=10, current_use=0)
+        InvitationCode.objects.create(project=project, organization=self.organization, max_use=5, current_use=3)
+        InvitationCode.objects.create(project=project, organization=self.organization, max_use=5, current_use=3)
+        InvitationCode.objects.create(project=project, organization=self.organization, max_use=10, current_use=0)
 
         settings = AppSettings.get_solo()
         self.assertEqual(settings.tokens_assigned, 20)
@@ -129,17 +151,17 @@ class AppSettingsTests(TestCase):
     def test_reduce_total_tokens_below_assigned_via_update_succeeds(self):
         """AppSettings.objects.update() bypasses save() validation."""
         project = Project.objects.create(name="Test")
-        InvitationCode.objects.create(project=project, max_use=80)
+        InvitationCode.objects.create(project=project, organization=self.organization, max_use=80)
         self.assertEqual(AppSettings.get_solo().tokens_assigned, 80)
         AppSettings.objects.update(total_tokens=50)
         settings = AppSettings.get_solo()
         self.assertEqual(settings.total_tokens, 50)
         with self.assertRaises(ValidationError):
-            InvitationCode.objects.create(project=project, max_use=1)
+            InvitationCode.objects.create(project=project, organization=self.organization, max_use=1)
 
     def test_reduce_total_tokens_below_assigned_via_save_raises_error(self):
         project = Project.objects.create(name="Test")
-        InvitationCode.objects.create(project=project, max_use=80)
+        InvitationCode.objects.create(project=project, organization=self.organization, max_use=80)
         self.assertEqual(AppSettings.get_solo().tokens_assigned, 80)
         settings = AppSettings.get_solo()
         settings.total_tokens = 50
@@ -298,6 +320,7 @@ from django.test.utils import override_settings
 class ImportInvitationCodesTests(TestCase):
     def setUp(self):
         self.project = Project.objects.create(name="ourlens")
+        self.organization = Organization.objects.create(name="Test Org")
         AppSettings.get_solo()
         AppSettings.objects.update(total_tokens=100)
 
@@ -314,45 +337,45 @@ class ImportInvitationCodesTests(TestCase):
             "ABC002,True,5,2\n",
         ])
         out = io.StringIO()
-        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path, stdout=out)
         self.assertIn("2 created", out.getvalue())
         self.assertEqual(InvitationCode.objects.count(), 2)
 
     def test_project_not_found(self):
         csv_path = self._write_csv(["X,true,5,0\n"])
         with self.assertRaisesMessage(Exception, "Project 'ghost' not found"):
-            call_command("import_invitation_codes", project="ghost", csv=csv_path)
+            call_command("import_invitation_codes", project="ghost", organization="Test Org", csv=csv_path)
 
     def test_csv_file_not_found(self):
         with self.assertRaisesRegex(Exception, "CSV file not found"):
-            call_command("import_invitation_codes", project="ourlens", csv="/no/such/file.csv")
+            call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv="/no/such/file.csv")
 
     def test_missing_required_columns(self):
         f = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
         f.write("code,is_active\nX,true\n")
         f.close()
         with self.assertRaisesRegex(Exception, "missing required columns"):
-            call_command("import_invitation_codes", project="ourlens", csv=f.name)
+            call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=f.name)
 
     def test_rejects_non_integer_max_use(self):
         csv_path = self._write_csv(["X,true,notanint,0\n"])
         with self.assertRaisesRegex(Exception, "invalid row"):
-            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+            call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path)
 
     def test_rejects_non_boolean_is_active(self):
         csv_path = self._write_csv(["X,banana,5,0\n"])
         with self.assertRaisesRegex(Exception, "invalid row"):
-            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+            call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path)
 
     def test_rejects_current_exceeds_max(self):
         csv_path = self._write_csv(["X,true,5,10\n"])
         with self.assertRaisesRegex(Exception, "invalid row"):
-            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+            call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path)
 
     def test_rejects_max_use_zero(self):
         csv_path = self._write_csv(["X,true,0,0\n"])
         with self.assertRaisesRegex(Exception, "invalid row"):
-            call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+            call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path)
 
     def test_token_pool_auto_bump(self):
         AppSettings.objects.update(total_tokens=10)
@@ -361,7 +384,7 @@ class ImportInvitationCodesTests(TestCase):
             "B,true,10,0\n",
         ])
         out = io.StringIO()
-        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path, stdout=out)
         self.assertIn("bumped", out.getvalue())
         self.assertEqual(AppSettings.get_solo().total_tokens, 20)
 
@@ -369,16 +392,16 @@ class ImportInvitationCodesTests(TestCase):
         AppSettings.objects.update(total_tokens=50)
         csv_path = self._write_csv(["A,true,10,0\n"])
         out = io.StringIO()
-        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path, stdout=out)
         self.assertIn("sufficient", out.getvalue())
         self.assertEqual(AppSettings.get_solo().total_tokens, 50)
 
     def test_idempotent_re_run_overwrites_existing(self):
         csv_path = self._write_csv(["A,true,10,0\n"])
-        call_command("import_invitation_codes", project="ourlens", csv=csv_path)
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path)
         self.assertEqual(InvitationCode.objects.count(), 1)
         out = io.StringIO()
-        call_command("import_invitation_codes", project="ourlens", csv=csv_path, stdout=out)
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path, stdout=out)
         self.assertIn("updated", out.getvalue())
         self.assertIn("1 updated", out.getvalue())
         self.assertEqual(InvitationCode.objects.count(), 1)
@@ -389,10 +412,22 @@ class ImportInvitationCodesTests(TestCase):
         f.write("A,true,5,0,sk-or-v1-abc123\n")
         f.close()
         out = io.StringIO()
-        call_command("import_invitation_codes", project="ourlens", csv=f.name, stdout=out)
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=f.name, stdout=out)
         self.assertIn("1 created", out.getvalue())
         self.assertEqual(InvitationCode.objects.count(), 1)
 
+    def test_organization_not_found(self):
+        csv_path = self._write_csv(["X,true,5,0\n"])
+        with self.assertRaisesMessage(Exception, "Organization 'Ghost' not found"):
+            call_command("import_invitation_codes", project="ourlens", organization="Ghost", csv=csv_path)
+
+    def test_valid_organization_import(self):
+        csv_path = self._write_csv(["CODE1,true,10,0\n"])
+        out = io.StringIO()
+        call_command("import_invitation_codes", project="ourlens", organization="Test Org", csv=csv_path, stdout=out)
+        self.assertIn("1 created", out.getvalue())
+        code = InvitationCode.objects.get(code="CODE1")
+        self.assertEqual(code.organization, self.organization)
 
 
 @override_settings(STORAGES={

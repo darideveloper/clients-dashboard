@@ -2,7 +2,7 @@
 import_invitation_codes — Bulk import invitation codes from a CSV file.
 
 Usage:
-    python manage.py import_invitation_codes --project <name> --csv <path>
+    python manage.py import_invitation_codes --project <name> --organization <name> --csv <path>
 
 CSV format (required columns):
     code, is_active, max_use_rate, current_use_rate
@@ -18,7 +18,8 @@ Column mapping:
     current_use_rate   → current_use
 
 Behavior:
-    - Project is looked up by name (not ID), so the same CSV works across envs.
+    - Project and Organization are looked up by name (not ID), so the same
+      CSV works across envs.
     - Before inserting, AppSettings.total_tokens is bumped if the CSV's total
       max_use_rate exceeds the current pool. The old and new values are reported.
     - All rows are validated upfront (types, current ≤ max, required columns).
@@ -36,7 +37,7 @@ from django.db.models import Sum
 from django.db.utils import IntegrityError
 from django.core.management.base import BaseCommand, CommandError
 
-from ourlives.models import AppSettings, InvitationCode, Project
+from ourlives.models import AppSettings, InvitationCode, Organization, Project
 
 REQUIRED_COLUMNS = {"code", "is_active", "max_use_rate", "current_use_rate"}
 
@@ -62,6 +63,12 @@ class Command(BaseCommand):
             help="Name of the project to link codes to.",
         )
         parser.add_argument(
+            "--organization",
+            "-o",
+            required=True,
+            help="Name of the organization to link codes to.",
+        )
+        parser.add_argument(
             "--csv",
             "-c",
             required=True,
@@ -70,6 +77,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         project_name = options["project"]
+        organization_name = options["organization"]
         csv_path = options["csv"]
 
         # ------------------------------------------------------------------
@@ -107,6 +115,12 @@ class Command(BaseCommand):
         except Project.DoesNotExist:
             fh.close()
             raise CommandError(f"Project '{project_name}' not found.")
+
+        try:
+            organization = Organization.objects.get(name=organization_name)
+        except Organization.DoesNotExist:
+            fh.close()
+            raise CommandError(f"Organization '{organization_name}' not found.")
 
         # ------------------------------------------------------------------
         # 2.3  Row-level validation
@@ -154,6 +168,7 @@ class Command(BaseCommand):
                 {
                     "code": code,
                     "project": project,
+                    "organization": organization,
                     "is_active": is_active,
                     "max_use": max_use,
                     "current_use": current_use,
@@ -213,6 +228,7 @@ class Command(BaseCommand):
                         code=obj.code,
                         defaults={
                             "project": obj.project,
+                            "organization": obj.organization,
                             "is_active": obj.is_active,
                             "max_use": obj.max_use,
                             "current_use": obj.current_use,
