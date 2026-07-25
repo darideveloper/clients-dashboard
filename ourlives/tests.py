@@ -873,6 +873,38 @@ class SyncStripePriceCommandTests(TestCase):
         mock_product_create.assert_not_called()
 
 
+class AppSettingsAdminTests(TestCase):
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        from django.test import RequestFactory
+        from ourlives.admin import AppSettingsAdmin
+
+        self.factory = RequestFactory()
+        self.site = AdminSite()
+        self.admin = AppSettingsAdmin(AppSettings, self.site)
+        self.superuser = User.objects.create_superuser(
+            username="su", email="su@test.com", password="x",
+        )
+        self.staff = User.objects.create_user(
+            username="staff", email="staff@test.com", password="x",
+            is_staff=True,
+        )
+
+    def test_superuser_sees_api_fields_as_editable(self):
+        request = self.factory.get("/")
+        request.user = self.superuser
+        readonly = self.admin.get_readonly_fields(request)
+        self.assertNotIn("api_key", readonly)
+        self.assertNotIn("storage_base_url", readonly)
+
+    def test_non_superuser_staff_sees_api_fields_as_readonly(self):
+        request = self.factory.get("/")
+        request.user = self.staff
+        readonly = self.admin.get_readonly_fields(request)
+        self.assertIn("api_key", readonly)
+        self.assertIn("storage_base_url", readonly)
+
+
 class PaymentSuccessViewTests(TestCase):
     def setUp(self):
         self.client = Client()
