@@ -65,7 +65,7 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
             "fields": ("stripe_product_id", "stripe_price_id", "sync_stripe_price_link"),
         }),
         ("API Configuration", {
-            "fields": ("api_key", "storage_base_url"),
+            "fields": ("storage_base_url",),
         }),
         ("Status", {
             "fields": (
@@ -87,7 +87,7 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
     def get_readonly_fields(self, request, obj=None):
         readonly = super().get_readonly_fields(request, obj)
         if not request.user.is_superuser:
-            readonly += ("api_key", "storage_base_url")
+            readonly += ("storage_base_url",)
         return readonly
 
     @admin.display(description="Tokens Assigned")

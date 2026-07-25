@@ -894,14 +894,12 @@ class AppSettingsAdminTests(TestCase):
         request = self.factory.get("/")
         request.user = self.superuser
         readonly = self.admin.get_readonly_fields(request)
-        self.assertNotIn("api_key", readonly)
         self.assertNotIn("storage_base_url", readonly)
 
     def test_non_superuser_staff_sees_api_fields_as_readonly(self):
         request = self.factory.get("/")
         request.user = self.staff
         readonly = self.admin.get_readonly_fields(request)
-        self.assertIn("api_key", readonly)
         self.assertIn("storage_base_url", readonly)
 
 

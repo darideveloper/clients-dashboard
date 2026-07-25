@@ -166,11 +166,6 @@ class AppSettings(SingletonModel):
         blank=True,
         help_text="Stripe Price ID (e.g., 'price_xxxxx'). Auto-populated by sync_stripe_price command.",
     )
-    api_key = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="API key for external service integration.",
-    )
     storage_base_url = models.URLField(
         blank=True,
         help_text="Base URL for external file storage.",

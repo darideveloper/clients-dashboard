@@ -1,9 +1,11 @@
-# admin-managed-settings Specification
+## REMOVED Requirements
 
-## Purpose
-Runtime configuration of storage URLs through the AppSettings singleton, editable only by superusers in the admin interface.
+### Requirement: api_key and storage_base_url on AppSettings
+**Reason**: The `api_key` field is not needed — the intended external service doesn't require a per-instance API key
+**Migration**: Remove `api_key` field via new migration. `storage_base_url` remains unchanged.
 
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: storage_base_url on AppSettings
 The `AppSettings` singleton model SHALL have a `storage_base_url` field (URLField, blank=True). The field SHALL be stored in the `ourlives_appsettings` database table.
 
@@ -11,12 +13,16 @@ The `AppSettings` singleton model SHALL have a `storage_base_url` field (URLFiel
 - **WHEN** `AppSettings.get_solo()` is called
 - **THEN** the returned instance has `storage_base_url` attribute defaulting to `""`
 
-#### Scenario: Migration applies cleanly
+#### Scenario: api_key is removed
+- **WHEN** `AppSettings.get_solo()` is called
+- **THEN** the returned instance does NOT have an `api_key` attribute
+
+#### Scenario: Migration drops column cleanly
 - **WHEN** `python manage.py migrate` runs
-- **THEN** the migration stores the column in `ourlives_appsettings` without data loss
+- **THEN** the migration drops the `api_key` column from `ourlives_appsettings` without data loss
 
 ### Requirement: Superuser-only editing in admin
-The `AppSettingsAdmin` SHALL display `storage_base_url` in the "API Configuration" fieldset. Non-superuser staff (`is_staff=True` but `is_superuser=False`) SHALL see the field as read-only. Superusers SHALL see an editable input.
+The `AppSettingsAdmin` SHALL display `storage_base_url` in the "API Configuration" fieldset. Non-superuser staff SHALL see it as read-only. Superusers SHALL see an editable input.
 
 #### Scenario: Superuser can edit storage_base_url
 - **WHEN** a superuser opens the AppSettings change form
