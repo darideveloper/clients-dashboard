@@ -5,7 +5,7 @@ from django.urls import path, reverse
 from django.utils.html import format_html
 from solo.admin import SingletonModelAdmin
 
-from project.admin_base import ModelAdminUnfoldBase
+from project.admin_base import ModelAdminUnfoldBase, OurlivesExportMixin, OurlivesModelAdminBase
 from ourlives.models import AppSettings, InvitationCode, Organization, Project, StripeEvent
 
 
@@ -14,7 +14,7 @@ def can_purchase(request):
 
 
 @admin.register(Project)
-class ProjectAdmin(ModelAdminUnfoldBase):
+class ProjectAdmin(OurlivesModelAdminBase):
     sidebar_icon = "folder"
     list_display = ("name", "description")
     list_display_links = ("name",)
@@ -22,7 +22,7 @@ class ProjectAdmin(ModelAdminUnfoldBase):
 
 
 @admin.register(Organization)
-class OrganizationAdmin(ModelAdminUnfoldBase):
+class OrganizationAdmin(OurlivesModelAdminBase):
     sidebar_icon = "business"
     list_display = ("name", "description")
     list_display_links = ("name",)
@@ -30,7 +30,7 @@ class OrganizationAdmin(ModelAdminUnfoldBase):
 
 
 @admin.register(InvitationCode)
-class InvitationCodeAdmin(ModelAdminUnfoldBase):
+class InvitationCodeAdmin(OurlivesModelAdminBase):
     sidebar_icon = "key"
     list_display = ("code", "project", "organization", "is_active", "max_use", "current_use", "usage_percentage")
     list_display_links = ("code",)
@@ -52,7 +52,9 @@ class InvitationCodeAdmin(ModelAdminUnfoldBase):
 
 
 @admin.register(AppSettings)
-class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
+class AppSettingsAdmin(SingletonModelAdmin, OurlivesExportMixin, ModelAdminUnfoldBase):
+    actions_list = ["export_all"]
+    actions_detail = ["export_all"]
     sidebar_icon = "settings"
     fieldsets = (
         ("Token Pool", {
@@ -150,7 +152,7 @@ class AppSettingsAdmin(SingletonModelAdmin, ModelAdminUnfoldBase):
 
 
 @admin.register(StripeEvent)
-class StripeEventAdmin(ModelAdminUnfoldBase):
+class StripeEventAdmin(OurlivesModelAdminBase):
     sidebar_icon = "receipt_long"
     list_display = ("stripe_event_id", "source", "token_count", "amount_cents", "presentment_currency", "presentment_amount", "handled_at")
     list_filter = ("presentment_currency",)

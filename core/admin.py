@@ -103,5 +103,5 @@ class GroupAdmin(BaseGroupAdmin, ModelAdminUnfoldBase):
 
 
 @admin.register(TokenProxy)
-class TokenAdmin(BaseTokenAdmin):
+class TokenAdmin(ModelAdminUnfoldBase, BaseTokenAdmin):
     sidebar_icon = "key"
