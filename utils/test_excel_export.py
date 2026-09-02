@@ -244,6 +244,7 @@ class ExcelExportAdminTests(TestCase):
         wb = load_workbook(filename=io.BytesIO(response.content))
         self.assertEqual(len(wb.sheetnames), 3)
 
+    @override_settings(STORAGES={"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"}, "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}})
     def test_empty_selection_warns(self):
         url = reverse("admin:ourlives_invitationcode_changelist")
         response = self.client.post(url, {"action": "export_selected", "_selected_action": []}, follow=True)
@@ -299,3 +300,113 @@ class FullAppExportPermissionTests(TestCase):
         request.user = user
         mixin = OurlivesExportMixin()
         self.assertFalse(mixin.has_export_all_permission(request))
+
+
+class ExportAllDetailRegressionTests(TestCase):
+    """Regression for TypeError on actions_detail (object_id) — fix-export-all-detail-signature."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.client = Client()
+        self.superuser = User.objects.create_superuser(username="detail_admin", email="detail@x.test", password="x")
+        self.staff_no_perms = User.objects.create_user(username="detail_staff", email="ds@x.test", password="x", is_staff=True)
+        self.client.force_login(self.superuser)
+        AppSettings.get_solo()
+        AppSettings.objects.update(total_tokens=10)
+        self.project = Project.objects.create(name="DetailP")
+
+    def test_export_all_without_object_id(self):
+        from django.contrib import admin
+        from ourlives.admin import ProjectAdmin
+        factory = RequestFactory()
+        request = factory.get("/")
+        request.user = self.superuser
+        model_admin = ProjectAdmin(Project, admin.site)
+        response = model_admin.export_all(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertIn("filename*", response["Content-Disposition"])
+        wb = load_workbook(filename=io.BytesIO(response.content))
+        self.assertGreaterEqual(len(wb.sheetnames), 1)
+
+    def test_export_all_with_object_id_positional(self):
+        from django.contrib import admin
+        from ourlives.admin import ProjectAdmin
+        request = self.factory.get("/")
+        request.user = self.superuser
+        model_admin = ProjectAdmin(Project, admin.site)
+        # detail route passes object_id as kwarg; also test positional
+        response = model_admin.export_all(request, object_id="1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertIn("filename*", response["Content-Disposition"])
+
+    def test_export_all_with_object_id_kwarg(self):
+        from django.contrib import admin
+        from ourlives.admin import ProjectAdmin
+        request = self.factory.get("/")
+        request.user = self.superuser
+        model_admin = ProjectAdmin(Project, admin.site)
+        response = model_admin.export_all(request, object_id="999", extra="ignored")
+        self.assertEqual(response.status_code, 200)
+
+    def test_export_all_with_kwargs_only(self):
+        from django.contrib import admin
+        from ourlives.admin import ProjectAdmin
+        request = self.factory.get("/")
+        request.user = self.superuser
+        model_admin = ProjectAdmin(Project, admin.site)
+        response = model_admin.export_all(request, **{"object_id": "1"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_has_export_all_permission_with_object_id_granted(self):
+        from project.admin_base import OurlivesExportMixin
+        request = self.factory.get("/")
+        request.user = self.superuser
+        mixin = OurlivesExportMixin()
+        self.assertTrue(mixin.has_export_all_permission(request, "1"))
+        self.assertTrue(mixin.has_export_all_permission(request, object_id="1"))
+        self.assertTrue(mixin.has_export_all_permission(request, obj="1"))
+
+    def test_has_export_all_permission_with_object_id_denied(self):
+        from project.admin_base import OurlivesExportMixin
+        request = self.factory.get("/")
+        request.user = self.staff_no_perms
+        mixin = OurlivesExportMixin()
+        self.assertFalse(mixin.has_export_all_permission(request, "1"))
+        self.assertFalse(mixin.has_export_all_permission(request, object_id="1"))
+
+    def test_export_all_list_route_via_client(self):
+        # actions_list: /admin/ourlives/project/export_all/
+        url = reverse("admin:ourlives_project_export_all")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertIn("filename*", response["Content-Disposition"])
+        wb = load_workbook(filename=io.BytesIO(response.content))
+        self.assertGreaterEqual(len(wb.sheetnames), 1)
+
+    def test_export_all_detail_route_via_client_project(self):
+        # actions_detail: /admin/ourlives/project/<id>/export_all/
+        url = reverse("admin:ourlives_project_export_all", args=[self.project.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_export_all_detail_route_via_client_appsettings(self):
+        # Singleton changeform detail route — the original failing URL
+        url = reverse("admin:ourlives_appsettings_export_all", args=[1])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        wb = load_workbook(filename=io.BytesIO(response.content))
+        self.assertGreaterEqual(len(wb.sheetnames), 1)
+
+    def test_export_all_detail_same_workbook_as_list(self):
+        list_url = reverse("admin:ourlives_project_export_all")
+        detail_url = reverse("admin:ourlives_project_export_all", args=[self.project.pk])
+        r_list = self.client.get(list_url)
+        r_detail = self.client.get(detail_url)
+        wb_list = load_workbook(filename=io.BytesIO(r_list.content))
+        wb_detail = load_workbook(filename=io.BytesIO(r_detail.content))
+        self.assertEqual(sorted(wb_list.sheetnames), sorted(wb_detail.sheetnames))

@@ -75,7 +75,7 @@ class ModelAdminUnfoldBase(ModelAdmin):
 
 class OurlivesExportMixin:
     @action(description="Export all app data", icon="download", permissions=["export_all"])
-    def export_all(self, request):
+    def export_all(self, request, object_id=None, *args, **kwargs):
         from utils.excel_export import build_full_app_workbook
 
         wb = build_full_app_workbook()
@@ -83,7 +83,7 @@ class OurlivesExportMixin:
         filename = f"ourlives_full_export_{ts}.xlsx"
         return _excel_response(wb, filename)
 
-    def has_export_all_permission(self, request, obj=None):
+    def has_export_all_permission(self, request, obj=None, *args, **kwargs):
         user = getattr(request, "user", None)
         if not user or not getattr(user, "is_staff", False):
             return False
