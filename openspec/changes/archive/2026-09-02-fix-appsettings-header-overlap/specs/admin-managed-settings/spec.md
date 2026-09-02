@@ -1,30 +1,6 @@
-# admin-managed-settings Specification
+# Delta: admin-managed-settings — header layout clarification
 
-## Purpose
-Runtime configuration of storage URLs through the AppSettings singleton, editable only by superusers in the admin interface.
-
-## Requirements
-### Requirement: storage_base_url on AppSettings
-The `AppSettings` singleton model SHALL have a `storage_base_url` field (URLField, blank=True). The field SHALL be stored in the `ourlives_appsettings` database table.
-
-#### Scenario: storage_base_url exists on model
-- **WHEN** `AppSettings.get_solo()` is called
-- **THEN** the returned instance has `storage_base_url` attribute defaulting to `""`
-
-#### Scenario: Migration applies cleanly
-- **WHEN** `python manage.py migrate` runs
-- **THEN** the migration stores the column in `ourlives_appsettings` without data loss
-
-### Requirement: Superuser-only editing in admin
-The `AppSettingsAdmin` SHALL display `storage_base_url` in the "API Configuration" fieldset. Non-superuser staff (`is_staff=True` but `is_superuser=False`) SHALL see the field as read-only. Superusers SHALL see an editable input.
-
-#### Scenario: Superuser can edit storage_base_url
-- **WHEN** a superuser opens the AppSettings change form
-- **THEN** the `storage_base_url` field is editable
-
-#### Scenario: Non-superuser sees read-only
-- **WHEN** a staff user who is not a superuser opens the AppSettings change form
-- **THEN** the `storage_base_url` field displays as read-only text
+## ADDED Requirements
 
 ### Requirement: Singleton changeform header layout (no overlap)
 

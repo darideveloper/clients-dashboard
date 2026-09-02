@@ -1,0 +1,28 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+{% load admin_urls %}
+
+{% block breadcrumbs %}
+{% if skip_object_list_page %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a> &rsaquo;
+    <a href="../">{{ opts.app_config.verbose_name }}</a> &rsaquo;
+    {{ opts.verbose_name|capfirst }}
+</div>
+{% else %}
+{{ block.super }}
+{% endif %}
+{% endblock %}
+
+{% block object-tools-items %}
+    {% if show_history %}
+        {% url opts|admin_urlname:'history' original.pk|admin_urlquote as history_url %}
+        {% trans 'History' as title %}
+        {% add_preserved_filters history_url as link %}
+        {% include "unfold/helpers/tab_action.html" with title=title link=link icon="history" %}
+    {% endif %}
+    {% if has_absolute_url and show_view_on_site %}
+        {% trans 'View on site' as title %}
+        {% include "unfold/helpers/tab_action.html" with title=title link=absolute_url blank=1 icon="open_in_new" %}
+    {% endif %}
+{% endblock %}
