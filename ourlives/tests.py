@@ -9,7 +9,19 @@ from django.db.models.deletion import ProtectedError
 from django.test import TestCase, Client
 from django.urls import reverse
 
-from ourlives.models import AppSettings, InvitationCode, Organization, Project, StripeEvent, calculate_token_count
+from ourlives.models import (
+    AppSettings,
+    CodeType,
+    ContactType,
+    Country,
+    InvitationCode,
+    OrderType,
+    Organization,
+    Project,
+    Rep,
+    StripeEvent,
+    calculate_token_count,
+)
 
 
 class ProjectTests(TestCase):
@@ -290,7 +302,7 @@ class CreateCheckoutSessionTests(TestCase):
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args[1]
 
-        self.assertEqual(call_kwargs["payment_method_types"], ["card"])
+        self.assertEqual(call_kwargs["payment_method_types"], [])
         self.assertEqual(call_kwargs["customer_email"], "test@example.com")
         self.assertEqual(call_kwargs["adaptive_pricing"], {"enabled": True})
 
@@ -547,7 +559,7 @@ class CreateCheckoutViewTests(TestCase):
         self.assertEqual(response.url, "https://checkout.stripe.com/test")
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args[1]
-        self.assertEqual(call_kwargs["payment_method_types"], ["card"])
+        self.assertEqual(call_kwargs["payment_method_types"], [])
         self.assertEqual(call_kwargs["customer_email"], "op@test.com")
         self.assertEqual(call_kwargs["adaptive_pricing"], {"enabled": True})
         line_items = call_kwargs["line_items"]
@@ -921,3 +933,148 @@ class PaymentSuccessViewTests(TestCase):
         response = self.client.get("/stripe/success/")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("admin:ourlives_appsettings_change"))
+
+
+class CountryTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_create_country(self):
+        country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland", region="EU")
+        self.assertEqual(country.iso2, "ZZ")
+        self.assertEqual(country.iso3, "ZZZ")
+        self.assertEqual(country.name, "Testland")
+        self.assertEqual(str(country), "Testland")
+
+    def test_duplicate_iso2_raises_error(self):
+        Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+        with self.assertRaises(IntegrityError):
+            Country.objects.create(iso2="ZZ", iso3="YYY", name="Otherland")
+
+    def test_duplicate_iso3_raises_error(self):
+        Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+        with self.assertRaises(IntegrityError):
+            Country.objects.create(iso2="YY", iso3="ZZZ", name="Otherland")
+
+    def test_duplicate_name_raises_error(self):
+        Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+        with self.assertRaises(IntegrityError):
+            Country.objects.create(iso2="YY", iso3="YYY", name="Testland")
+
+
+class RepTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_create_rep(self):
+        rep = Rep.objects.create(first_name="John", last_name="Doe", email="john@ourlivesapp.com")
+        self.assertEqual(rep.first_name, "John")
+        self.assertEqual(rep.last_name, "Doe")
+        self.assertEqual(rep.email, "john@ourlivesapp.com")
+        self.assertEqual(str(rep), "John Doe")
+
+    def test_duplicate_email_raises_error(self):
+        Rep.objects.create(first_name="John", last_name="Doe", email="john@ourlivesapp.com")
+        with self.assertRaises(IntegrityError):
+            Rep.objects.create(first_name="Jane", last_name="Smith", email="john@ourlivesapp.com")
+
+    def test_no_fixture_rows(self):
+        # Rep has no base fixture — base_loaddata must not create any
+        self.assertEqual(Rep.objects.count(), 0)
+
+
+class ContactTypeTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_create_contact_type(self):
+        ct = ContactType.objects.create(code="testcode", name="Test Contact")
+        self.assertEqual(ct.code, "testcode")
+        self.assertEqual(str(ct), "Test Contact")
+
+    def test_duplicate_code_raises_error(self):
+        ContactType.objects.create(code="testcode", name="Test Contact")
+        with self.assertRaises(IntegrityError):
+            ContactType.objects.create(code="testcode", name="Other Contact")
+
+    def test_duplicate_name_raises_error(self):
+        ContactType.objects.create(code="testcode", name="Test Contact")
+        with self.assertRaises(IntegrityError):
+            ContactType.objects.create(code="othercode", name="Test Contact")
+
+
+class CodeTypeTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_create_code_type(self):
+        ct = CodeType.objects.create(code="test_code", name="Test Code", max_codes=10)
+        self.assertEqual(ct.code, "test_code")
+        self.assertEqual(ct.max_codes, 10)
+        self.assertEqual(str(ct), "Test Code")
+
+    def test_duplicate_code_raises_error(self):
+        CodeType.objects.create(code="test_code", name="Test Code", max_codes=5)
+        with self.assertRaises(IntegrityError):
+            CodeType.objects.create(code="test_code", name="Other Code", max_codes=5)
+
+    def test_duplicate_name_raises_error(self):
+        CodeType.objects.create(code="test_code", name="Test Code", max_codes=5)
+        with self.assertRaises(IntegrityError):
+            CodeType.objects.create(code="other_code", name="Test Code", max_codes=5)
+
+
+class OrderTypeTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_create_order_type(self):
+        ot = OrderType.objects.create(code="custom", name="Custom Order")
+        self.assertEqual(ot.code, "custom")
+        self.assertEqual(str(ot), "Custom Order")
+
+    def test_duplicate_code_raises_error(self):
+        OrderType.objects.create(code="custom", name="Custom Order")
+        with self.assertRaises(IntegrityError):
+            OrderType.objects.create(code="custom", name="Other Order")
+
+    def test_duplicate_name_raises_error(self):
+        OrderType.objects.create(code="custom", name="Custom Order")
+        with self.assertRaises(IntegrityError):
+            OrderType.objects.create(code="othercode", name="Custom Order")
+
+
+class Phase1FixturesTests(TestCase):
+    def test_base_loaddata_loads_all_fixtures(self):
+        call_command("base_loaddata")
+        self.assertEqual(Country.objects.count(), 249)
+        self.assertEqual(ContactType.objects.count(), 4)
+        self.assertEqual(CodeType.objects.count(), 2)
+        self.assertEqual(OrderType.objects.count(), 4)
+        self.assertEqual(Rep.objects.count(), 0)
+        # Explicit PKs alphabetical-from-1
+        self.assertEqual(Country.objects.get(pk=1).iso2, "AD")
+        self.assertEqual(Country.objects.get(pk=249).iso2, "ZW")
+        self.assertEqual(ContactType.objects.get(pk=1).code, "billing")
+        self.assertEqual(CodeType.objects.get(pk=1).code, "up_to_20")
+        self.assertEqual(CodeType.objects.get(pk=2).code, "up_to_5")
+        self.assertEqual(OrderType.objects.get(pk=1).code, "pilot")
+
+    def test_fixture_idempotent(self):
+        call_command("base_loaddata")
+        counts = (
+            Country.objects.count(),
+            ContactType.objects.count(),
+            CodeType.objects.count(),
+            OrderType.objects.count(),
+        )
+        call_command("base_loaddata")
+        self.assertEqual(
+            counts,
+            (
+                Country.objects.count(),
+                ContactType.objects.count(),
+                CodeType.objects.count(),
+                OrderType.objects.count(),
+            ),
+        )

@@ -1,0 +1,42 @@
+[
+  {
+    "model": "ourlives.ContactType",
+    "pk": 1,
+    "fields": {
+      "code": "billing",
+      "name": "Billing Contact",
+      "active": true,
+      "description": "Extensible contact role, from 616/619"
+    }
+  },
+  {
+    "model": "ourlives.ContactType",
+    "pk": 2,
+    "fields": {
+      "code": "invoice",
+      "name": "Invoice Contact",
+      "active": true,
+      "description": "Extensible contact role, from 616/619"
+    }
+  },
+  {
+    "model": "ourlives.ContactType",
+    "pk": 3,
+    "fields": {
+      "code": "primary",
+      "name": "Primary Contact",
+      "active": true,
+      "description": "Extensible contact role, from 616/619"
+    }
+  },
+  {
+    "model": "ourlives.ContactType",
+    "pk": 4,
+    "fields": {
+      "code": "technical",
+      "name": "Technical Contact",
+      "active": true,
+      "description": "Extensible contact role, from 616/619"
+    }
+  }
+]

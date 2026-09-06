@@ -1,0 +1,24 @@
+[
+  {
+    "model": "ourlives.CodeType",
+    "pk": 1,
+    "fields": {
+      "code": "up_to_20",
+      "name": "Up to 20 Additional Codes",
+      "max_codes": 20,
+      "active": true,
+      "description": "Large team bundle, up to 20 additional codes, separate frontend field"
+    }
+  },
+  {
+    "model": "ourlives.CodeType",
+    "pk": 2,
+    "fields": {
+      "code": "up_to_5",
+      "name": "Up to 5 Additional Codes",
+      "max_codes": 5,
+      "active": true,
+      "description": "Small team bundle, separate frontend field"
+    }
+  }
+]

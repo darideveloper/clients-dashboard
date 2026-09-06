@@ -1,0 +1,42 @@
+[
+  {
+    "model": "ourlives.OrderType",
+    "pk": 1,
+    "fields": {
+      "code": "pilot",
+      "name": "Pilot Order",
+      "active": true,
+      "description": "Pilot order for initial evaluation period, replaces hard boolean is_pilot_order"
+    }
+  },
+  {
+    "model": "ourlives.OrderType",
+    "pk": 2,
+    "fields": {
+      "code": "renewal",
+      "name": "Renewal Order",
+      "active": true,
+      "description": "Renewal order for extending existing service after pilot"
+    }
+  },
+  {
+    "model": "ourlives.OrderType",
+    "pk": 3,
+    "fields": {
+      "code": "standard",
+      "name": "Standard Order",
+      "active": true,
+      "description": "Standard order for regular full-scope service"
+    }
+  },
+  {
+    "model": "ourlives.OrderType",
+    "pk": 4,
+    "fields": {
+      "code": "trial",
+      "name": "Trial Order",
+      "active": true,
+      "description": "Trial order for short-term evaluation with limited scope"
+    }
+  }
+]

@@ -302,3 +302,79 @@ def process_ourlives_checkout_completion(stripe_event_data):
         )
 
     return True
+
+
+class Country(models.Model):
+    iso2 = models.CharField(max_length=2, unique=True)
+    iso3 = models.CharField(max_length=3, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+    region = models.CharField(max_length=10, blank=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Country"
+        verbose_name_plural = "Countries"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Rep(models.Model):
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    email = models.EmailField(max_length=254, unique=True)
+
+    class Meta:
+        verbose_name = "Rep"
+        verbose_name_plural = "Reps"
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name}"
+
+
+class ContactType(models.Model):
+    code = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+    active = models.BooleanField(default=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Contact Type"
+        verbose_name_plural = "Contact Types"
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
+
+
+class CodeType(models.Model):
+    code = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+    max_codes = models.PositiveIntegerField()
+    active = models.BooleanField(default=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Code Type"
+        verbose_name_plural = "Code Types"
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
+
+
+class OrderType(models.Model):
+    code = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+    active = models.BooleanField(default=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Order Type"
+        verbose_name_plural = "Order Types"
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
