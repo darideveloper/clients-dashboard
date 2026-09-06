@@ -1,0 +1,12 @@
+[
+  {
+    "model": "core.Brand",
+    "pk": 1,
+    "fields": {
+      "name": "Default Brand",
+      "slug": "default-brand",
+      "is_default": true,
+      "primary_color": "#C92FFF"
+    }
+  }
+]

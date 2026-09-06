@@ -1,27 +1,18 @@
 """
-seed_brands — one-shot data + file back-fill for the `profile-to-brand` change.
+backfill_brand_files — slimmed from seed_brands after fixture split.
 
-Run ONCE after `python manage.py migrate core` (which applies the auto-generated
-schema migration) and BEFORE the schema enforces `User.brand` `NOT NULL`.
+Forward (`./manage.py backfill_brand_files`):
+    1. Require the Default Brand row from base fixture `core/fixtures/core/Brand.json`
+       (fail loudly if missing — do NOT call Brand.get_or_create_default()).
+    2. For every user without a Membership, assign the Default Brand.
+    3. Relocate logo files: avatars/user_<id>/ → brands/brand_<pk>/ (missing skipped).
 
-Forward (`./manage.py seed_brands`):
-    1. Get-or-create the system Default Brand (`Brand.DEFAULT_NAME`).
-    2. For every user, ensure `User.brand` is set:
-       - Users created via the admin get the Default Brand via `UserAdmin.save_model`.
-       - Users created programmatically (or before the signal-removal commit) are
-         assigned the Default Brand here.
-    3. Relocate logo files:
-       - Forward: `MEDIA_ROOT/avatars/user_<id>/<filename>` → `MEDIA_ROOT/brands/brand_<pk>/<filename>`
-       - Update `Brand.logo.name` to the new relative path.
-       - Missing source files are silently skipped.
-
-Reverse (`./manage.py seed_brands --reverse`):
-    - Move files back from `brands/brand_<pk>/` to `avatars/user_<id>/` (best-effort).
-    - Reassign `User.brand` only if a snapshot is available; otherwise no-op
-      with a warning (the one-to-one relationship is no longer represented).
+Reverse (`./manage.py backfill_brand_files --reverse`):
+    - Move files back from brands/brand_<pk>/ to avatars/user_<id>/ (best-effort).
 
 Idempotent: running forward twice is a no-op the second time.
 """
+
 import os
 import re
 import shutil
@@ -29,10 +20,9 @@ import warnings
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from core.models import Brand, Membership
-
 
 LEGACY_AVATAR_DIR = "avatars"
 NEW_BRAND_DIR = "brands"
@@ -40,7 +30,8 @@ NEW_BRAND_DIR = "brands"
 
 class Command(BaseCommand):
     help = (
-        "One-shot data + file back-fill for the profile-to-brand change. "
+        "Membership backfill + logo file relocation (slimmed from seed_brands). "
+        "Requires base fixture via base_loaddata; fails loudly if Default Brand missing. "
         "Idempotent; supports --reverse to best-effort restore legacy paths."
     )
 
@@ -59,11 +50,20 @@ class Command(BaseCommand):
         else:
             self._handle_forward()
 
+    def _get_default_brand(self):
+        try:
+            return Brand.objects.get(name=Brand.DEFAULT_NAME)
+        except Brand.DoesNotExist:
+            raise CommandError(
+                "Default Brand not found. Run `python manage.py base_loaddata` first "
+                "(fixture core/fixtures/core/Brand.json must be loaded)."
+            )
+
     # -- forward --------------------------------------------------------------
 
     def _handle_forward(self):
         media_root = settings.MEDIA_ROOT
-        default_brand = Brand.get_or_create_default()
+        default_brand = self._get_default_brand()
         self.stdout.write(f"Default brand: {default_brand!r} (pk={default_brand.pk})")
 
         User = get_user_model()
@@ -137,7 +137,6 @@ class Command(BaseCommand):
             new_name = logo.name
             if not new_name.startswith(f"{NEW_BRAND_DIR}/brand_{brand.pk}/"):
                 continue
-            # Recover the user_id from the brand's membership (best-effort).
             membership = brand.memberships.first()
             if membership is None:
                 files_skipped += 1

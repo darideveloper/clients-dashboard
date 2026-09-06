@@ -7,5 +7,8 @@ echo "Running migrations..."
 python manage.py makemigrations --noinput
 python manage.py migrate --noinput
 
+echo "Loading base fixtures..."
+python manage.py base_loaddata
+
 echo "Starting Gunicorn..."
 exec gunicorn --bind 0.0.0.0:80 project.wsgi:application

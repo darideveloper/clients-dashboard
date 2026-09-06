@@ -1,4 +1,61 @@
 erDiagram
+    %% Source: ourlives/models.py + sales ingestion spec (Formidable Ourlens US Order Form V2). Django entities are source of truth. Keeps full 14-table aspirational CRM.
+    %% === Implemented — Django models.py ===
+    projects {
+        int project_id PK "e.g. 1, Django Project model"
+        string name UK "e.g. ourlens, ourplan required, Project.name"
+        string description "e.g. App project, Project.description"
+    }
+
+    organizations {
+        int organization_id PK "e.g. 12 ex-companies, Django Organization model"
+        string name UK "e.g. Acme Health Ltd required, Organization.name"
+        string description "e.g. Billing entity, Organization.description"
+        int assigned_rep_id FK "e.g. 7->John nullable, ERD companies.assigned_rep_id"
+        date first_order_date "e.g. 2026-01-15 derived"
+        date last_order_date "e.g. 2026-09-02 derived"
+        int total_orders "e.g. 3 derived"
+        decimal total_revenue "e.g. 12500.00 derived"
+    }
+
+    invitation_codes {
+        int invitation_code_id PK "e.g. 501 ex-codes.code_id, InvitationCode.id"
+        int project_id FK "e.g. 1->ourlens required, FK->projects PROTECT"
+        int organization_id FK "e.g. 12->Acme required, FK->organizations PROTECT"
+        string code UK "e.g. ACME-LONDON-001 required, code_value field_od22f2, InvitationCode.code"
+        boolean is_active "e.g. true required, InvitationCode.is_active"
+        int max_use "e.g. 5 required independent of code_type, InvitationCode.max_use"
+        int current_use "e.g. 2 CHECK current_use<=max_use, InvitationCode.current_use"
+        int order_id FK "e.g. 82->OL-82 nullable PROTECT, FK->orders, new additive"
+        int code_type_id FK "e.g. 1->Up to 5 nullable PROTECT, FK->code_types, new additive"
+        int sequence "e.g. 1 nullable 1-20 no DB constraint"
+    }
+
+    app_settings {
+        int app_settings_id PK "e.g. 1 Singleton, AppSettings model"
+        int total_tokens "e.g. 100 required, AppSettings.total_tokens"
+        decimal price_per_token "e.g. 0.10 USD, AppSettings.price_per_token"
+        decimal min_purchase_amount "e.g. 5.00 USD, AppSettings.min_purchase_amount"
+        string stripe_product_id "e.g. prod_xxx nullable, AppSettings.stripe_product_id"
+        string stripe_price_id "e.g. price_xxx nullable, AppSettings.stripe_price_id"
+        string storage_base_url "e.g. https://storage.example nullable, AppSettings.storage_base_url"
+        int tokens_assigned "e.g. 20 derived SUM invitation_codes.max_use"
+        int tokens_used "e.g. 6 derived SUM invitation_codes.current_use"
+        int tokens_available "e.g. 80 derived total_tokens-assigned"
+    }
+
+    stripe_events {
+        int id PK "e.g. 1, Django StripeEvent.id (auto)"
+        string stripe_event_id UK "e.g. evt_test_123 UK, StripeEvent.stripe_event_id"
+        string source "e.g. ourlives required, StripeEvent.source"
+        int token_count "e.g. 50 required, StripeEvent.token_count"
+        int amount_cents "e.g. 1000 required, StripeEvent.amount_cents"
+        string presentment_currency "e.g. eur nullable, StripeEvent.presentment_currency"
+        int presentment_amount "e.g. 920 nullable, StripeEvent.presentment_amount"
+        datetime handled_at "e.g. 2026-09-02T01:45:00Z, StripeEvent.handled_at"
+    }
+
+    %% === Planned — aspirational CRM (countries/currencies/products etc.) ===
     countries {
         int country_id PK "e.g. 1"
         string iso2 UK "e.g. US, GB, CA required, from field_enrcy2_country"
@@ -20,7 +77,7 @@ erDiagram
     }
 
     products {
-        int product_id PK "e.g. 1"
+        int product_id PK "e.g. 1 distinct from projects, field_q8zvr2"
         int currency_id FK "e.g. 1->USD required"
         string name "e.g. Micro Pilot required, field_q8zvr2"
         string tier "e.g. micro required, ENUM regional/enterprise"
@@ -33,9 +90,9 @@ erDiagram
         int code_type_id PK "e.g. 1"
         string code UK "e.g. up_to_5 required"
         string name "e.g. Up to 5 Additional Codes required, field_uwfjk2"
-        int max_codes "e.g. 5 required"
+        int max_codes "e.g. 5 required independent of invitation_codes.max_use"
         boolean active "e.g. true required"
-        string description "e.g. Small team bundle"
+        string description "e.g. Small team bundle, separate frontend field"
     }
 
     reps {
@@ -47,19 +104,9 @@ erDiagram
         decimal total_revenue "e.g. 45600.00 derived SUM"
     }
 
-    companies {
-        int company_id PK "e.g. 12"
-        string name "e.g. Acme Health Ltd required, derived from address line1"
-        int assigned_rep_id FK "e.g. 7->John nullable"
-        date first_order_date "e.g. 2026-01-15 derived"
-        date last_order_date "e.g. 2026-09-02 derived"
-        int total_orders "e.g. 3 derived"
-        decimal total_revenue "e.g. 12500.00 derived"
-    }
-
-    company_addresses {
-        int address_id PK "e.g. 101"
-        int company_id FK "e.g. 12->Acme required"
+    organization_addresses {
+        int address_id PK "e.g. 101 ex-company_addresses"
+        int organization_id FK "e.g. 12->Acme required, FK->organizations"
         string line1 "e.g. 10 Downing St required, field_enrcy2_line1"
         string line2 "e.g. Suite 2 nullable, field_enrcy2_line2"
         string city "e.g. London required, field_enrcy2_city"
@@ -79,7 +126,7 @@ erDiagram
 
     contacts {
         int contact_id PK "e.g. 31"
-        int company_id FK "e.g. 12 -> Acme Ltd, required"
+        int organization_id FK "e.g. 12 -> Acme Ltd, required, ex-company_id"
         int contact_type_id FK "FK->contact_types, e.g. 1=Primary"
         string first_name "e.g. Alice, required"
         string last_name "e.g. Smith, required"
@@ -98,14 +145,14 @@ erDiagram
     orders {
         int order_id PK "e.g. 82"
         string order_number UK "OL - 82 readonly, required, from field_be8ml"
-        int company_id FK "e.g. 12 Acme Ltd, required"
+        int organization_id FK "e.g. 12 Acme Ltd, required, ex-company_id"
         int rep_id FK "e.g. 7 John Doe, required"
         int primary_contact_id FK "e.g. 31 Alice Smith, required"
         int invoice_contact_id FK "e.g. 32 Bob Smith, required"
         int order_type_id FK "FK->order_types, e.g. 1=Pilot, required"
         int currency_id FK "nullable, for non-pilot e.g. 1=USD, field_mo8wu"
         int pilot_currency_id FK "nullable, for pilot e.g. 3=GBP field_5znvs"
-        boolean is_pilot_order "legacy bool, e.g. true→Pilot, derived from order_type_id"
+        boolean is_pilot_order "legacy bool, e.g. true->Pilot, derived from order_type_id"
         boolean is_upgrade_from_pilot "nullable, e.g. true→show 613 banner, field_r9jxe2"
         boolean is_referral_order "e.g. true, field_53psq2"
         string referral_organisation "nullable, e.g. NHS Trust Midlands, field_t6li52"
@@ -121,8 +168,8 @@ erDiagram
     }
 
     order_order_types {
-        int order_id FK "e.g. 82, PK composite"
-        int order_type_id FK "e.g. 1=Pilot + 3=Referral, PK composite"
+        int order_id PK, FK "e.g. 82, PK composite"
+        int order_type_id PK, FK "e.g. 1=Pilot + 3=Referral, PK composite"
         string notes "e.g. junction for upgrades/referrals many-to-many, frmrules driven"
     }
 
@@ -135,26 +182,21 @@ erDiagram
         decimal line_total "e.g. 7990.00 generated quantity*unit_price"
     }
 
-    codes {
-        int code_id PK "e.g. 501"
-        int order_id FK "e.g. 82->OL-82 required"
-        int code_type_id FK "e.g. 1->Up to 5 required"
-        int sequence "e.g. 1 required CHECK 1-20"
-        string code_value "e.g. ACME-LONDON-001 required, field_od22f2"
-    }
-
     %% Relationships
-    countries ||--o{ company_addresses : "has"
+    countries ||--o{ organization_addresses : "has"
     countries ||--o{ currencies : "has"
     currencies ||--o{ products : "has"
     currencies ||--o{ orders : "currency_for_non_pilot"
     currencies ||--o{ orders : "pilot_currency"
 
-    companies ||--o{ company_addresses : "has"
-    companies ||--o{ contacts : "has"
-    companies ||--o{ orders : "places"
+    organizations ||--o{ organization_addresses : "has"
+    organizations ||--o{ contacts : "has"
+    organizations ||--o{ orders : "places"
+    organizations ||--o{ invitation_codes : "owns"
 
-    reps ||--o{ companies : "assigned_to"
+    projects ||--o{ invitation_codes : "defines"
+
+    reps ||--o{ organizations : "assigned_to"
     reps ||--o{ orders : "owns"
 
     contact_types ||--o{ contacts : "categorizes"
@@ -167,5 +209,5 @@ erDiagram
     orders ||--o{ order_items : "contains"
     products ||--o{ order_items : "ordered_as"
 
-    orders ||--o{ codes : "has"
-    code_types ||--o{ codes : "categorizes"
+    orders ||--o{ invitation_codes : "has"
+    code_types ||--o{ invitation_codes : "categorizes"

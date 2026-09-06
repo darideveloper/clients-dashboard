@@ -503,28 +503,58 @@ class PrimaryPaletteCssTests(TestCase):
         self.assertNotIn("oklch(from #000000", css)
 
 
-class SeedBrandsCommandTests(TestCase):
-    def setUp(self):
-        User.objects.create_user(username="orphan", email="o@x.test")
-
+class BaseLoaddataCommandTests(TestCase):
     def test_creates_default_brand(self):
         self.assertFalse(Brand.objects.filter(name=Brand.DEFAULT_NAME).exists())
-        call_command("seed_brands")
+        call_command("base_loaddata")
         self.assertTrue(Brand.objects.filter(name=Brand.DEFAULT_NAME).exists())
+        brand = Brand.objects.get(name=Brand.DEFAULT_NAME)
+        self.assertEqual(brand.pk, 1)
+        self.assertEqual(brand.slug, "default-brand")
+        self.assertTrue(brand.is_default)
+        self.assertEqual(brand.primary_color, "#C92FFF")
+
+    def test_base_loaddata_is_idempotent(self):
+        call_command("base_loaddata")
+        first_count = Brand.objects.filter(name=Brand.DEFAULT_NAME).count()
+        call_command("base_loaddata")
+        second_count = Brand.objects.filter(name=Brand.DEFAULT_NAME).count()
+        self.assertEqual(first_count, 1)
+        self.assertEqual(second_count, 1)
+
+    def test_base_loaddata_help(self):
+        # --help should succeed without loading fixtures
+        from django.core.management import get_commands
+
+        self.assertIn("base_loaddata", get_commands())
+        self.assertIn("seed_loaddata", get_commands())
+
+
+class BackfillBrandFilesCommandTests(TestCase):
+    def setUp(self):
+        User.objects.create_user(username="orphan", email="o@x.test")
+        call_command("base_loaddata")
 
     def test_assigns_orphan_users_to_default_brand(self):
-        call_command("seed_brands")
+        call_command("backfill_brand_files")
         user = User.objects.get(username="orphan")
         self.assertIsNotNone(user.brand)
         self.assertEqual(user.brand.name, Brand.DEFAULT_NAME)
 
     def test_idempotent(self):
-        call_command("seed_brands")
+        call_command("backfill_brand_files")
         first_count = Brand.objects.count()
-        call_command("seed_brands")
+        call_command("backfill_brand_files")
         second_count = Brand.objects.count()
-        self.assertEqual(first_count, 1)
-        self.assertEqual(second_count, 1)
+        # backfill does not create brands; count stays as fixture + any test brands
+        self.assertEqual(first_count, second_count)
+
+    def test_fails_loudly_without_fixture(self):
+        Brand.objects.filter(name=Brand.DEFAULT_NAME).delete()
+        from django.core.management.base import CommandError
+
+        with self.assertRaises(CommandError):
+            call_command("backfill_brand_files")
 
     def test_moves_legacy_avatar_files(self):
         media_root = tempfile.mkdtemp()
@@ -540,7 +570,7 @@ class SeedBrandsCommandTests(TestCase):
             brand.logo.name = f"avatars/user_{brand_pk}/pic.png"
             brand.save()
 
-            call_command("seed_brands")
+            call_command("backfill_brand_files")
 
             brand.refresh_from_db()
             expected_dir = os.path.join(media_root, "brands", f"brand_{brand.pk}")
@@ -563,7 +593,7 @@ class SeedBrandsCommandTests(TestCase):
             brand = Brand.objects.create(name="B")
             brand.logo.name = "avatars/user_999/ghost.png"
             brand.save()
-            call_command("seed_brands")
+            call_command("backfill_brand_files")
             brand.refresh_from_db()
             self.assertEqual(brand.logo.name, "avatars/user_999/ghost.png")
 
@@ -901,9 +931,97 @@ class LogoutBrandLinkTests(TestCase):
         self._assert_button_url(response, expected_url)
 
 
-class SeedBrandsCommandIsDefaultTests(TestCase):
+class BaseLoaddataDefaultBrandTests(TestCase):
     def test_creates_default_brand_with_is_default(self):
         Brand.objects.filter(name=Brand.DEFAULT_NAME).delete()
-        call_command("seed_brands")
-        default = Brand.get_or_create_default()
+        call_command("base_loaddata")
+        default = Brand.objects.get(name=Brand.DEFAULT_NAME)
         self.assertTrue(default.is_default)
+
+
+# Backwards compatibility alias for archived specs referencing old name
+SeedBrandsCommandIsDefaultTests = BaseLoaddataDefaultBrandTests
+
+
+class FixtureLoaderOrderingTests(TestCase):
+    def test_find_fixtures_sorted_respects_numeric_prefix(self):
+        from core.management.commands.base_loaddata import Command as BaseCmd
+        from core.management.commands.seed_loaddata import Command as SeedCmd
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for name in ["01_Bar.json", "00_Foo.json", "Baz.json"]:
+                open(os.path.join(tmpdir, name), "w").close()
+            base = BaseCmd()
+            seed = SeedCmd()
+            result = base._find_fixtures(tmpdir)
+            self.assertEqual(result, ["00_Foo", "01_Bar", "Baz"])
+            self.assertEqual(seed._find_fixtures(tmpdir), ["00_Foo", "01_Bar", "Baz"])
+
+    def test_base_loaddata_loads_in_sorted_order(self):
+        from unittest.mock import patch
+
+        from core.management.commands.base_loaddata import Command
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for name in ["01_Bar.json", "00_Foo.json"]:
+                open(os.path.join(tmpdir, name), "w").close()
+            cmd = Command()
+            # Patch apps.get_app_configs to return a fake app pointing at tmpdir
+            fake_app = type("FakeApp", (), {"path": os.path.dirname(tmpdir), "label": "fake"})()
+            # _find_fixtures will look at <path>/fixtures/<label>
+            # So create that structure
+            fixture_dir = os.path.join(tmpdir, "fixtures", "fake")
+            os.makedirs(fixture_dir, exist_ok=True)
+            for name in ["01_Bar.json", "00_Foo.json"]:
+                open(os.path.join(fixture_dir, name), "w").close()
+            fake_app.path = tmpdir
+            with patch("core.management.commands.base_loaddata.apps.get_app_configs", return_value=[fake_app]):
+                with patch("core.management.commands.base_loaddata.call_command") as mock_call:
+                    cmd.handle()
+                    # Should be called in sorted order: 00_Foo then 01_Bar
+                    self.assertEqual(
+                        [c.args[1] for c in mock_call.call_args_list],
+                        ["fake/00_Foo", "fake/01_Bar"],
+                    )
+
+
+class BackfillBrandFilesReverseTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_reverse_moves_files_back(self):
+        media_root = tempfile.mkdtemp()
+        with override_settings(MEDIA_ROOT=media_root):
+            user = User.objects.create_user(username="revuser", email="r@x.test")
+            brand = Brand.objects.create(name="RevBrand")
+            Membership.objects.create(user=user, brand=brand)
+            # Simulate forward already happened: file at brands/brand_<pk>/pic.png
+            brand_dir = os.path.join(media_root, "brands", f"brand_{brand.pk}")
+            os.makedirs(brand_dir, exist_ok=True)
+            new_path = os.path.join(brand_dir, "pic.png")
+            from PIL import Image as PilImage
+
+            img = PilImage.new("RGB", (50, 50), (0, 255, 0))
+            img.save(new_path, format="PNG")
+            brand.logo.name = f"brands/brand_{brand.pk}/pic.png"
+            brand.save()
+
+            call_command("backfill_brand_files", "--reverse")
+
+            brand.refresh_from_db()
+            expected_legacy = f"avatars/user_{user.pk}/pic.png"
+            self.assertEqual(brand.logo.name, expected_legacy)
+            old_abs = os.path.join(media_root, expected_legacy)
+            self.assertTrue(os.path.exists(old_abs))
+            self.assertFalse(os.path.exists(new_path))
+
+    def test_reverse_skips_missing_source(self):
+        media_root = tempfile.mkdtemp()
+        with override_settings(MEDIA_ROOT=media_root):
+            brand = Brand.objects.create(name="NoFileBrand")
+            brand.logo.name = f"brands/brand_{brand.pk}/ghost.png"
+            brand.save()
+            # No file on disk, no membership — should be no-op
+            call_command("backfill_brand_files", "--reverse")
+            brand.refresh_from_db()
+            self.assertEqual(brand.logo.name, f"brands/brand_{brand.pk}/ghost.png")
