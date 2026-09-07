@@ -1,0 +1,158 @@
+[
+  {
+    "model": "ourlives.Currency",
+    "pk": 1,
+    "fields": {
+      "code": "USD",
+      "name": "US Dollar",
+      "symbol_left": "$",
+      "symbol_right": "",
+      "exchange_rate": "1.00",
+      "active": true,
+      "countries": [233, 63, 210, 249, 173, 221, 143, 73, 185]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 2,
+    "fields": {
+      "code": "EUR",
+      "name": "Euro",
+      "symbol_left": "€",
+      "symbol_right": "",
+      "exchange_rate": "0.86",
+      "active": true,
+      "countries": [12, 20, 98, 55, 64, 70, 75, 57, 89, 102, 110, 135, 133, 134, 153, 166, 184, 202, 200, 68]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 3,
+    "fields": {
+      "code": "JPY",
+      "name": "Japanese Yen",
+      "symbol_left": "¥",
+      "symbol_right": "",
+      "exchange_rate": "161.00",
+      "active": true,
+      "countries": [114]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 4,
+    "fields": {
+      "code": "GBP",
+      "name": "British Pound",
+      "symbol_left": "£",
+      "symbol_right": "",
+      "exchange_rate": "0.75",
+      "active": true,
+      "countries": [77]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 5,
+    "fields": {
+      "code": "CNY",
+      "name": "Chinese Yuan",
+      "symbol_left": "CN¥",
+      "symbol_right": "",
+      "exchange_rate": "6.74",
+      "active": true,
+      "countries": [48]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 6,
+    "fields": {
+      "code": "CHF",
+      "name": "Swiss Franc",
+      "symbol_left": "Fr",
+      "symbol_right": "",
+      "exchange_rate": "0.81",
+      "active": true,
+      "countries": [43, 129]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 7,
+    "fields": {
+      "code": "AUD",
+      "name": "Australian Dollar",
+      "symbol_left": "A$",
+      "symbol_right": "",
+      "exchange_rate": "1.41",
+      "active": true,
+      "countries": [13, 118, 169, 227]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 8,
+    "fields": {
+      "code": "CAD",
+      "name": "Canadian Dollar",
+      "symbol_left": "CA$",
+      "symbol_right": "",
+      "exchange_rate": "1.39",
+      "active": true,
+      "countries": [38]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 9,
+    "fields": {
+      "code": "HKD",
+      "name": "Hong Kong Dollar",
+      "symbol_left": "HK$",
+      "symbol_right": "",
+      "exchange_rate": "7.84",
+      "active": true,
+      "countries": [95]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 10,
+    "fields": {
+      "code": "SGD",
+      "name": "Singapore Dollar",
+      "symbol_left": "S$",
+      "symbol_right": "",
+      "exchange_rate": "1.29",
+      "active": true,
+      "countries": [198]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 11,
+    "fields": {
+      "code": "NZD",
+      "name": "New Zealand Dollar",
+      "symbol_left": "NZ$",
+      "symbol_right": "",
+      "exchange_rate": "1.69",
+      "active": true,
+      "countries": [171, 45, 170, 181, 220]
+    }
+  },
+  {
+    "model": "ourlives.Currency",
+    "pk": 12,
+    "fields": {
+      "code": "ZAR",
+      "name": "South African Rand",
+      "symbol_left": "R",
+      "symbol_right": "",
+      "exchange_rate": "17.80",
+      "active": true,
+      "countries": [247, 132, 160, 213]
+    }
+  }
+]

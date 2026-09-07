@@ -1276,3 +1276,37 @@ class OrganizationAddressTests(TestCase):
         )
         self.organization.delete()
         self.assertEqual(OrganizationAddress.objects.count(), 0)
+
+
+class CurrencyFixtureTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_base_loaddata_seeds_twelve_currencies(self):
+        codes = set(Currency.objects.values_list("code", flat=True))
+        self.assertEqual(codes, {
+            "USD", "EUR", "JPY", "GBP", "CNY", "CHF",
+            "AUD", "CAD", "HKD", "SGD", "NZD", "ZAR",
+        })
+        self.assertTrue(all(c.active for c in Currency.objects.all()))
+
+    def test_fixture_currencies_link_to_using_countries(self):
+        links = {
+            code: set(Currency.objects.get(code=code).countries.values_list("iso2", flat=True))
+            for code in ("USD", "EUR", "GBP", "ZAR")
+        }
+        self.assertEqual(links["USD"], {"US", "EC", "SV", "ZW", "PA", "TL", "MH", "FM", "PW"})
+        self.assertEqual(len(links["EUR"]), 20)
+        self.assertIn("DE", links["EUR"])
+        self.assertIn("FR", links["EUR"])
+        self.assertEqual(links["GBP"], {"GB"})
+        self.assertEqual(links["ZAR"], {"ZA", "LS", "NA", "SZ"})
+
+    def test_fixture_idempotent(self):
+        call_command("base_loaddata")
+        self.assertEqual(Currency.objects.count(), 12)
+
+    def test_seeded_currency_unblocks_product_creation(self):
+        usd = Currency.objects.get(code="USD")
+        product = Product.objects.create(currency=usd, name="Micro Pilot", unit_price=Decimal("995.00"))
+        self.assertEqual(product.currency, usd)
