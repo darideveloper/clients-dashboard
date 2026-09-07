@@ -378,3 +378,100 @@ class OrderType(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Currency(models.Model):
+    code = models.CharField(max_length=3, unique=True)
+    name = models.CharField(max_length=100)
+    symbol_left = models.CharField(max_length=10, blank=True)
+    symbol_right = models.CharField(max_length=10, blank=True)
+    exchange_rate = models.DecimalField(max_digits=10, decimal_places=2)
+    country = models.ForeignKey(
+        Country,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="currencies",
+    )
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Currency"
+        verbose_name_plural = "Currencies"
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.code
+
+
+class Product(models.Model):
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        related_name="products",
+    )
+    name = models.CharField(max_length=200)
+    tier = models.CharField(max_length=50, blank=True)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    active = models.BooleanField(default=True)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Product"
+        verbose_name_plural = "Products"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Contact(models.Model):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="contacts",
+    )
+    contact_type = models.ForeignKey(
+        ContactType,
+        on_delete=models.PROTECT,
+        related_name="contacts",
+    )
+    first_name = models.CharField(max_length=100)
+    last_name = models.CharField(max_length=100)
+    email = models.EmailField(max_length=254)
+    phone = models.CharField(max_length=50, blank=True)
+
+    class Meta:
+        verbose_name = "Contact"
+        verbose_name_plural = "Contacts"
+        ordering = ["last_name", "first_name"]
+
+    def __str__(self):
+        return f"{self.first_name} {self.last_name}"
+
+
+class OrganizationAddress(models.Model):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="addresses",
+    )
+    country = models.ForeignKey(
+        Country,
+        on_delete=models.PROTECT,
+        related_name="organization_addresses",
+    )
+    line1 = models.CharField(max_length=255)
+    line2 = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100, blank=True)
+    zip = models.CharField(max_length=20)
+    is_primary = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = "Organization Address"
+        verbose_name_plural = "Organization Addresses"
+        ordering = ["-is_primary", "city"]
+
+    def __str__(self):
+        return f"{self.line1}, {self.city}"

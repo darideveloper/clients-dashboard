@@ -12,11 +12,15 @@ from django.urls import reverse
 from ourlives.models import (
     AppSettings,
     CodeType,
+    Contact,
     ContactType,
     Country,
+    Currency,
     InvitationCode,
     OrderType,
     Organization,
+    OrganizationAddress,
+    Product,
     Project,
     Rep,
     StripeEvent,
@@ -1136,3 +1140,127 @@ class LookupAdminTests(TestCase):
         self.assertEqual(tuple(ma.autocomplete_fields), ("project", "organization"))
         self.assertEqual(tuple(ma.list_editable), ("is_active",))
         self.assertEqual(self.client.get("/admin/ourlives/invitationcode/").status_code, 200)
+
+
+class CurrencyTests(TestCase):
+    def test_create_currency_with_country(self):
+        country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+        currency = Currency.objects.create(
+            code="TTD", name="Test Dollar", symbol_left="T$",
+            exchange_rate=Decimal("1.35"), country=country,
+        )
+        self.assertEqual(currency.code, "TTD")
+        self.assertEqual(currency.country, country)
+        self.assertTrue(currency.active)
+        self.assertEqual(str(currency), "TTD")
+
+    def test_country_is_nullable(self):
+        currency = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("1.00"))
+        self.assertIsNone(currency.country)
+
+    def test_country_delete_sets_null(self):
+        country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+        currency = Currency.objects.create(code="TTD", name="Test Dollar", exchange_rate=Decimal("1.00"), country=country)
+        country.delete()
+        currency.refresh_from_db()
+        self.assertIsNone(currency.country)
+
+    def test_duplicate_code_raises_error(self):
+        Currency.objects.create(code="TTD", name="Test Dollar", exchange_rate=Decimal("1.00"))
+        with self.assertRaises(IntegrityError):
+            Currency.objects.create(code="TTD", name="Other Dollar", exchange_rate=Decimal("2.00"))
+
+
+class ProductTests(TestCase):
+    def setUp(self):
+        self.currency = Currency.objects.create(code="USD", name="US Dollar", symbol_left="$", exchange_rate=Decimal("1.00"))
+
+    def test_create_product(self):
+        product = Product.objects.create(
+            currency=self.currency, name="Micro Pilot", tier="micro",
+            unit_price=Decimal("995.00"), description="Pilot bundle",
+        )
+        self.assertEqual(product.name, "Micro Pilot")
+        self.assertEqual(product.currency, self.currency)
+        self.assertTrue(product.active)
+        self.assertEqual(str(product), "Micro Pilot")
+
+    def test_currency_protected(self):
+        Product.objects.create(currency=self.currency, name="Micro Pilot", unit_price=Decimal("995.00"))
+        with self.assertRaises(ProtectedError):
+            self.currency.delete()
+
+
+class ContactTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Org")
+        self.contact_type = ContactType.objects.create(code="primary", name="Primary Contact")
+
+    def test_create_contact(self):
+        contact = Contact.objects.create(
+            organization=self.organization, contact_type=self.contact_type,
+            first_name="Alice", last_name="Smith",
+            email="alice@acme.com", phone="+44 7700 900123",
+        )
+        self.assertEqual(contact.email, "alice@acme.com")
+        self.assertEqual(str(contact), "Alice Smith")
+
+    def test_organization_delete_cascades(self):
+        Contact.objects.create(
+            organization=self.organization, contact_type=self.contact_type,
+            first_name="Alice", last_name="Smith", email="alice@acme.com",
+        )
+        self.organization.delete()
+        self.assertEqual(Contact.objects.count(), 0)
+
+    def test_contact_type_protected(self):
+        Contact.objects.create(
+            organization=self.organization, contact_type=self.contact_type,
+            first_name="Alice", last_name="Smith", email="alice@acme.com",
+        )
+        with self.assertRaises(ProtectedError):
+            self.contact_type.delete()
+
+
+class OrganizationAddressTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Org")
+        self.country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+
+    def test_create_address(self):
+        address = OrganizationAddress.objects.create(
+            organization=self.organization, country=self.country,
+            line1="10 Downing St", city="London", zip="SW1A 2AA", is_primary=True,
+        )
+        self.assertEqual(address.city, "London")
+        self.assertTrue(address.is_primary)
+        self.assertEqual(str(address), "10 Downing St, London")
+
+    def test_filter_primary_address(self):
+        OrganizationAddress.objects.create(
+            organization=self.organization, country=self.country,
+            line1="10 Downing St", city="London", zip="SW1A 2AA", is_primary=True,
+        )
+        OrganizationAddress.objects.create(
+            organization=self.organization, country=self.country,
+            line1="221B Baker St", city="London", zip="NW1 6XE", is_primary=False,
+        )
+        primary = OrganizationAddress.objects.filter(organization=self.organization, is_primary=True)
+        self.assertEqual(primary.count(), 1)
+        self.assertEqual(primary.get().line1, "10 Downing St")
+
+    def test_country_protected(self):
+        OrganizationAddress.objects.create(
+            organization=self.organization, country=self.country,
+            line1="10 Downing St", city="London", zip="SW1A 2AA",
+        )
+        with self.assertRaises(ProtectedError):
+            self.country.delete()
+
+    def test_organization_delete_cascades(self):
+        OrganizationAddress.objects.create(
+            organization=self.organization, country=self.country,
+            line1="10 Downing St", city="London", zip="SW1A 2AA",
+        )
+        self.organization.delete()
+        self.assertEqual(OrganizationAddress.objects.count(), 0)
