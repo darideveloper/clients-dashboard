@@ -6,7 +6,7 @@ from django.utils.html import format_html
 from solo.admin import SingletonModelAdmin
 
 from project.admin_base import ModelAdminUnfoldBase, OurlivesExportMixin, OurlivesModelAdminBase
-from ourlives.models import AppSettings, InvitationCode, Organization, Project, StripeEvent
+from ourlives.models import AppSettings, CodeType, ContactType, Country, InvitationCode, OrderType, Organization, Project, Rep, StripeEvent
 
 
 def can_purchase(request):
@@ -37,6 +37,8 @@ class InvitationCodeAdmin(OurlivesModelAdminBase):
     list_filter = ("is_active", "project", "organization")
     search_fields = ("code", "project__name", "organization__name")
     readonly_fields = ("current_use",)
+    autocomplete_fields = ("project", "organization")
+    list_editable = ("is_active",)
 
     @admin.display(description="Usage %")
     def usage_percentage(self, obj):
@@ -49,6 +51,60 @@ class InvitationCodeAdmin(OurlivesModelAdminBase):
             super().save_model(request, obj, form, change)
         except ValidationError as e:
             self.message_user(request, str(e), messages.ERROR)
+
+
+@admin.register(Country)
+class CountryAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "globe"
+    list_display = ("iso2", "iso3", "name", "active")
+    list_display_links = ("iso2",)
+    list_filter = ("active",)
+    search_fields = ("iso2", "iso3", "name")
+    list_editable = ("active",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Rep)
+class RepAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "person"
+    list_display = ("first_name", "last_name", "email")
+    list_display_links = ("first_name",)
+    search_fields = ("first_name", "last_name", "email")
+
+
+@admin.register(ContactType)
+class ContactTypeAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "contacts"
+    list_display = ("code", "name", "active")
+    list_display_links = ("code",)
+    list_filter = ("active",)
+    search_fields = ("code", "name")
+    list_editable = ("active",)
+
+
+@admin.register(CodeType)
+class CodeTypeAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "sell"
+    list_display = ("code", "name", "max_codes", "active")
+    list_display_links = ("code",)
+    list_filter = ("active",)
+    search_fields = ("code", "name")
+    list_editable = ("active",)
+
+
+@admin.register(OrderType)
+class OrderTypeAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "shopping_bag"
+    list_display = ("code", "name", "active")
+    list_display_links = ("code",)
+    list_filter = ("active",)
+    search_fields = ("code", "name")
+    list_editable = ("active",)
 
 
 @admin.register(AppSettings)

@@ -1078,3 +1078,61 @@ class Phase1FixturesTests(TestCase):
                 OrderType.objects.count(),
             ),
         )
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class LookupAdminTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+        self.admin = User.objects.create_superuser("lookup_admin", "lookup@test.com", "x")
+        self.client = Client()
+        self.client.force_login(self.admin)
+
+    def test_lookup_changelists_render(self):
+        for url in ("country", "rep", "contacttype", "codetype", "ordertype"):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(f"/admin/ourlives/{url}/").status_code, 200)
+
+    def test_country_add_and_delete_blocked(self):
+        country = Country.objects.first()
+        self.assertEqual(self.client.get("/admin/ourlives/country/add/").status_code, 403)
+        self.assertEqual(
+            self.client.post(f"/admin/ourlives/country/{country.pk}/delete/", {"post": "yes"}).status_code,
+            403,
+        )
+
+    def test_country_inline_active_toggle_persists(self):
+        country = Country.objects.filter(active=True).first()
+        self.client.post("/admin/ourlives/country/", {
+            "form-TOTAL_FORMS": "1",
+            "form-INITIAL_FORMS": "1",
+            "form-0-id": str(country.pk),
+            "_save": "Save",
+        })
+        country.refresh_from_db()
+        self.assertFalse(country.active)
+
+    def test_rep_crud(self):
+        rep = Rep.objects.create(first_name="Jane", last_name="Doe", email="jane@ourlivesapp.com")
+        self.assertEqual(self.client.get("/admin/ourlives/rep/").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/admin/ourlives/rep/{rep.pk}/change/").status_code, 200,
+        )
+
+    def test_lookup_export_actions_registered(self):
+        from django.contrib import admin as admin_site
+
+        for model in (Country, Rep, ContactType, CodeType, OrderType):
+            with self.subTest(model=model.__name__):
+                self.assertIn("export_selected", admin_site.site._registry[model].actions)
+
+    def test_invitation_code_autocomplete_and_editable(self):
+        from django.contrib import admin as admin_site
+
+        ma = admin_site.site._registry[InvitationCode]
+        self.assertEqual(tuple(ma.autocomplete_fields), ("project", "organization"))
+        self.assertEqual(tuple(ma.list_editable), ("is_active",))
+        self.assertEqual(self.client.get("/admin/ourlives/invitationcode/").status_code, 200)
