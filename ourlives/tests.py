@@ -1143,27 +1143,39 @@ class LookupAdminTests(TestCase):
 
 
 class CurrencyTests(TestCase):
-    def test_create_currency_with_country(self):
-        country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
+    def test_create_currency_with_countries(self):
+        de = Country.objects.create(iso2="DE", iso3="DEU", name="Germany")
+        fr = Country.objects.create(iso2="FR", iso3="FRA", name="France")
         currency = Currency.objects.create(
-            code="TTD", name="Test Dollar", symbol_left="T$",
-            exchange_rate=Decimal("1.35"), country=country,
+            code="EUR", name="Euro", symbol_left="€",
+            exchange_rate=Decimal("0.92"),
         )
-        self.assertEqual(currency.code, "TTD")
-        self.assertEqual(currency.country, country)
+        currency.countries.add(de, fr)
+        self.assertEqual(currency.code, "EUR")
+        self.assertEqual(set(currency.countries.all()), {de, fr})
         self.assertTrue(currency.active)
-        self.assertEqual(str(currency), "TTD")
+        self.assertEqual(str(currency), "EUR")
 
-    def test_country_is_nullable(self):
-        currency = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("1.00"))
-        self.assertIsNone(currency.country)
+    def test_countries_are_optional(self):
+        currency = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
+        self.assertEqual(currency.countries.count(), 0)
 
-    def test_country_delete_sets_null(self):
-        country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Testland")
-        currency = Currency.objects.create(code="TTD", name="Test Dollar", exchange_rate=Decimal("1.00"), country=country)
-        country.delete()
+    def test_shared_currency_across_countries(self):
+        de = Country.objects.create(iso2="DE", iso3="DEU", name="Germany")
+        fr = Country.objects.create(iso2="FR", iso3="FRA", name="France")
+        eur = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("0.92"))
+        eur.countries.add(de, fr)
+        self.assertIn(eur, de.currencies.all())
+        self.assertIn(eur, fr.currencies.all())
+
+    def test_country_delete_removes_only_the_link(self):
+        de = Country.objects.create(iso2="DE", iso3="DEU", name="Germany")
+        currency = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("0.92"))
+        currency.countries.add(de)
+        de.delete()
         currency.refresh_from_db()
-        self.assertIsNone(currency.country)
+        self.assertEqual(currency.countries.count(), 0)
+        self.assertTrue(Currency.objects.filter(code="EUR").exists())
 
     def test_duplicate_code_raises_error(self):
         Currency.objects.create(code="TTD", name="Test Dollar", exchange_rate=Decimal("1.00"))

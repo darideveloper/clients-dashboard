@@ -386,11 +386,9 @@ class Currency(models.Model):
     symbol_left = models.CharField(max_length=10, blank=True)
     symbol_right = models.CharField(max_length=10, blank=True)
     exchange_rate = models.DecimalField(max_digits=10, decimal_places=2)
-    country = models.ForeignKey(
+    countries = models.ManyToManyField(
         Country,
-        null=True,
         blank=True,
-        on_delete=models.SET_NULL,
         related_name="currencies",
     )
     active = models.BooleanField(default=True)
