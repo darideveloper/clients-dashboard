@@ -149,17 +149,16 @@ erDiagram
         int rep_id FK "e.g. 7 John Doe, required"
         int primary_contact_id FK "e.g. 31 Alice Smith, required"
         int invoice_contact_id FK "e.g. 32 Bob Smith, required"
-        int order_type_id FK "FK->order_types, e.g. 1=Pilot, required"
         int currency_id FK "nullable, for non-pilot e.g. 1=USD, field_mo8wu"
         int pilot_currency_id FK "nullable, for pilot e.g. 3=GBP field_5znvs"
-        boolean is_pilot_order "legacy bool, e.g. true->Pilot, derived from order_type_id"
+        boolean is_pilot_order "e.g. true->Pilot @property from M2M code=pilot, no column"
         boolean is_upgrade_from_pilot "nullable, e.g. true→show 613 banner, field_r9jxe2"
         boolean is_referral_order "e.g. true, field_53psq2"
         string referral_organisation "nullable, e.g. NHS Trust Midlands, field_t6li52"
         string po_number "e.g. PO-2026-8842, field_c8rim2 required"
         int number_of_scans "nullable, e.g. 500, field_mey192"
         decimal cost_per_scan "nullable, e.g. 2.50, field_8id4t"
-        decimal total_agreed_price "generated: number_of_scans*cost_per_scan, e.g. 1250.00"
+        decimal total_agreed_price "@property: number_of_scans*cost_per_scan, e.g. 1250.00, no column"
         string additional_information "e.g. Need invoice by month end, textarea field_684"
         string ip_address "e.g. 203.0.113.45 system"
         string form_entry_key "e.g. kR3x9 Formidable key"
@@ -179,7 +178,7 @@ erDiagram
         int product_id FK "e.g. 2->Regional Pilot required"
         int quantity "e.g. 2 required, field_alh5s2"
         decimal unit_price "e.g. 3995.00 required snapshot data-frmprice"
-        decimal line_total "e.g. 7990.00 generated quantity*unit_price"
+        decimal line_total "@property: quantity*unit_price, e.g. 7990.00, no column"
     }
 
     %% Relationships
@@ -203,7 +202,6 @@ erDiagram
     contacts ||--o{ orders : "primary_for"
     contacts ||--o{ orders : "invoice_for"
 
-    order_types ||--o{ orders : "types"
     order_types ||--o{ order_order_types : "categorizes"
     orders ||--o{ order_order_types : "has_junction"
     orders ||--o{ order_items : "contains"

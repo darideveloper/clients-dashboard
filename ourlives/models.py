@@ -11,6 +11,10 @@ def generate_invitation_code():
     return uuid.uuid4().hex[:12].upper()
 
 
+def generate_order_number():
+    return "OL-" + uuid.uuid4().hex[:6].upper()
+
+
 class Project(models.Model):
     name = models.CharField(
         max_length=100,
@@ -30,6 +34,13 @@ class Project(models.Model):
 class Organization(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
+    assigned_rep = models.ForeignKey(
+        "Rep",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="organizations",
+    )
 
     class Meta:
         verbose_name = "Organization"
@@ -63,6 +74,21 @@ class InvitationCode(models.Model):
         default=0,
         help_text="Incremented by external service. Read-only in admin.",
     )
+    order = models.ForeignKey(
+        "Order",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="invitation_codes",
+    )
+    code_type = models.ForeignKey(
+        "CodeType",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="invitation_codes",
+    )
+    sequence = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Invitation Code"
@@ -473,3 +499,116 @@ class OrganizationAddress(models.Model):
 
     def __str__(self):
         return f"{self.line1}, {self.city}"
+
+
+class Order(models.Model):
+    order_number = models.CharField(
+        max_length=50,
+        unique=True,
+        default=generate_order_number,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.PROTECT,
+        related_name="orders",
+    )
+    rep = models.ForeignKey(
+        Rep,
+        on_delete=models.PROTECT,
+        related_name="orders",
+    )
+    primary_contact = models.ForeignKey(
+        Contact,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="primary_orders",
+    )
+    invoice_contact = models.ForeignKey(
+        Contact,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="invoice_orders",
+    )
+    order_types = models.ManyToManyField(
+        OrderType,
+        blank=True,
+        related_name="orders",
+    )
+    currency = models.ForeignKey(
+        Currency,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="orders",
+    )
+    pilot_currency = models.ForeignKey(
+        Currency,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="pilot_orders",
+    )
+    is_upgrade_from_pilot = models.BooleanField(default=False)
+    is_referral_order = models.BooleanField(default=False)
+    referral_organisation = models.CharField(max_length=255, null=True, blank=True)
+    po_number = models.CharField(max_length=100)
+    number_of_scans = models.PositiveIntegerField(null=True, blank=True)
+    cost_per_scan = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    additional_information = models.TextField(blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    form_entry_key = models.CharField(max_length=100, null=True, blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    hcaptcha_verified = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = "Order"
+        verbose_name_plural = "Orders"
+        ordering = ["order_number"]
+
+    def __str__(self):
+        return self.order_number
+
+    @property
+    def is_pilot_order(self):
+        if self.pk is None:
+            return False
+        return self.order_types.filter(code="pilot").exists()
+
+    @property
+    def total_agreed_price(self):
+        if self.number_of_scans is None or self.cost_per_scan is None:
+            return Decimal("0")
+        return self.number_of_scans * self.cost_per_scan
+
+
+class OrderItem(models.Model):
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name="order_items",
+    )
+    quantity = models.PositiveIntegerField()
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = "Order Item"
+        verbose_name_plural = "Order Items"
+
+    def __str__(self):
+        return f"{self.quantity}x {self.product} on {self.order}"
+
+    @property
+    def line_total(self):
+        return self.quantity * self.unit_price

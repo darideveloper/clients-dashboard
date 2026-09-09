@@ -17,6 +17,8 @@ from ourlives.models import (
     Country,
     Currency,
     InvitationCode,
+    Order,
+    OrderItem,
     OrderType,
     Organization,
     OrganizationAddress,
@@ -1310,3 +1312,204 @@ class CurrencyFixtureTests(TestCase):
         usd = Currency.objects.get(code="USD")
         product = Product.objects.create(currency=usd, name="Micro Pilot", unit_price=Decimal("995.00"))
         self.assertEqual(product.currency, usd)
+
+
+class OrderTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Org")
+        self.rep = Rep.objects.create(first_name="John", last_name="Doe", email="john@ourlivesapp.com")
+        self.pilot = OrderType.objects.create(code="pilot", name="Pilot Order")
+        self.standard = OrderType.objects.create(code="standard", name="Standard Order")
+
+    def _create_order(self, **kwargs):
+        defaults = {"organization": self.organization, "rep": self.rep, "po_number": "PO-001"}
+        defaults.update(kwargs)
+        return Order.objects.create(**defaults)
+
+    def test_auto_generated_order_number(self):
+        order = self._create_order()
+        self.assertTrue(order.order_number.startswith("OL-"))
+        self.assertEqual(str(order), order.order_number)
+        other = self._create_order()
+        self.assertNotEqual(order.order_number, other.order_number)
+
+    def test_explicit_order_number_and_uniqueness(self):
+        order = self._create_order(order_number="OL-82")
+        self.assertEqual(order.order_number, "OL-82")
+        with self.assertRaises(IntegrityError):
+            self._create_order(order_number="OL-82")
+
+    def test_organization_protected(self):
+        self._create_order()
+        with self.assertRaises(ProtectedError):
+            self.organization.delete()
+
+    def test_rep_protected(self):
+        self._create_order()
+        with self.assertRaises(ProtectedError):
+            self.rep.delete()
+
+    def test_contacts_nullable_and_protected(self):
+        order = self._create_order()
+        self.assertIsNone(order.primary_contact)
+        self.assertIsNone(order.invoice_contact)
+        contact_type = ContactType.objects.create(code="primary", name="Primary Contact")
+        contact = Contact.objects.create(
+            organization=self.organization, contact_type=contact_type,
+            first_name="Alice", last_name="Smith", email="alice@acme.com",
+        )
+        order.primary_contact = contact
+        order.save()
+        with self.assertRaises(ProtectedError):
+            contact.delete()
+
+    def test_m2m_add_marks_pilot(self):
+        order = self._create_order()
+        self.assertFalse(order.is_pilot_order)
+        order.order_types.add(self.pilot)
+        self.assertTrue(order.is_pilot_order)
+
+    def test_m2m_remove_clears_pilot(self):
+        order = self._create_order()
+        order.order_types.add(self.pilot)
+        order.order_types.remove(self.pilot)
+        self.assertFalse(order.is_pilot_order)
+
+    def test_multiple_types_coexist(self):
+        order = self._create_order()
+        order.order_types.add(self.pilot, self.standard)
+        self.assertEqual(order.order_types.count(), 2)
+        self.assertTrue(order.is_pilot_order)
+
+    def test_unsaved_order_is_not_pilot(self):
+        order = Order(organization=self.organization, rep=self.rep, po_number="PO-002")
+        self.assertFalse(order.is_pilot_order)
+
+    def test_no_single_order_type_column(self):
+        self.assertNotIn("order_type", [f.name for f in Order._meta.get_fields()])
+
+    def test_total_agreed_price_computed(self):
+        order = self._create_order(number_of_scans=500, cost_per_scan=Decimal("2.50"))
+        self.assertEqual(order.total_agreed_price, Decimal("1250.00"))
+
+    def test_total_agreed_price_missing_inputs_returns_zero(self):
+        self.assertEqual(self._create_order().total_agreed_price, Decimal("0"))
+        self.assertEqual(
+            self._create_order(number_of_scans=500).total_agreed_price, Decimal("0"),
+        )
+        self.assertEqual(
+            self._create_order(cost_per_scan=Decimal("2.50")).total_agreed_price, Decimal("0"),
+        )
+
+    def test_no_total_agreed_price_column(self):
+        self.assertNotIn("total_agreed_price", [f.name for f in Order._meta.get_fields()])
+
+    def test_currency_delete_sets_null(self):
+        currency = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
+        order = self._create_order(currency=currency, pilot_currency=currency)
+        currency.delete()
+        order.refresh_from_db()
+        self.assertIsNone(order.currency)
+        self.assertIsNone(order.pilot_currency)
+
+
+class OrderItemTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Org")
+        self.rep = Rep.objects.create(first_name="John", last_name="Doe", email="john@ourlivesapp.com")
+        self.currency = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
+        self.product = Product.objects.create(
+            currency=self.currency, name="Micro Pilot", unit_price=Decimal("995.00"),
+        )
+        self.order = Order.objects.create(
+            organization=self.organization, rep=self.rep, po_number="PO-001",
+        )
+
+    def test_create_item_and_line_total(self):
+        item = OrderItem.objects.create(
+            order=self.order, product=self.product,
+            quantity=2, unit_price=Decimal("3995.00"),
+        )
+        self.assertEqual(item.line_total, Decimal("7990.00"))
+        self.assertIn("Micro Pilot", str(item))
+
+    def test_order_delete_cascades(self):
+        OrderItem.objects.create(
+            order=self.order, product=self.product,
+            quantity=1, unit_price=Decimal("995.00"),
+        )
+        self.order.delete()
+        self.assertEqual(OrderItem.objects.count(), 0)
+
+    def test_product_protected(self):
+        OrderItem.objects.create(
+            order=self.order, product=self.product,
+            quantity=1, unit_price=Decimal("995.00"),
+        )
+        with self.assertRaises(ProtectedError):
+            self.product.delete()
+
+    def test_duplicate_product_lines_allowed(self):
+        for _ in range(2):
+            OrderItem.objects.create(
+                order=self.order, product=self.product,
+                quantity=1, unit_price=Decimal("995.00"),
+            )
+        self.assertEqual(OrderItem.objects.count(), 2)
+
+
+class OrderLinkAlterationTests(TestCase):
+    def setUp(self):
+        self.project = Project.objects.create(name="Test Project")
+        self.organization = Organization.objects.create(name="Test Org")
+        self.rep = Rep.objects.create(first_name="John", last_name="Doe", email="john@ourlivesapp.com")
+        AppSettings.get_solo()
+        AppSettings.objects.update(total_tokens=100)
+
+    def test_backwards_compatible_creation(self):
+        code = InvitationCode.objects.create(
+            project=self.project, organization=self.organization, max_use=10,
+        )
+        self.assertIsNone(self.organization.assigned_rep)
+        self.assertIsNone(code.order)
+        self.assertIsNone(code.code_type)
+        self.assertIsNone(code.sequence)
+
+    def test_rep_delete_sets_null_on_organization(self):
+        self.organization.assigned_rep = self.rep
+        self.organization.save()
+        self.rep.delete()
+        self.organization.refresh_from_db()
+        self.assertIsNone(self.organization.assigned_rep)
+
+    def test_order_protected_from_invitation_code(self):
+        order = Order.objects.create(
+            organization=self.organization, rep=self.rep, po_number="PO-001",
+        )
+        InvitationCode.objects.create(
+            project=self.project, organization=self.organization, max_use=10, order=order,
+        )
+        with self.assertRaises(ProtectedError):
+            order.delete()
+
+    def test_code_type_protected_from_invitation_code(self):
+        code_type = CodeType.objects.create(code="up_to_5", name="Up to 5", max_codes=5)
+        InvitationCode.objects.create(
+            project=self.project, organization=self.organization, max_use=10, code_type=code_type,
+        )
+        with self.assertRaises(ProtectedError):
+            code_type.delete()
+
+    def test_link_fields_round_trip(self):
+        order = Order.objects.create(
+            organization=self.organization, rep=self.rep, po_number="PO-001",
+        )
+        code_type = CodeType.objects.create(code="up_to_5", name="Up to 5", max_codes=5)
+        code = InvitationCode.objects.create(
+            project=self.project, organization=self.organization, max_use=10,
+            order=order, code_type=code_type, sequence=3,
+        )
+        code.refresh_from_db()
+        self.assertEqual(code.order, order)
+        self.assertEqual(code.code_type, code_type)
+        self.assertEqual(code.sequence, 3)
