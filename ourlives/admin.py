@@ -6,7 +6,7 @@ from django.utils.html import format_html
 from solo.admin import SingletonModelAdmin
 
 from project.admin_base import ModelAdminUnfoldBase, OurlivesExportMixin, OurlivesModelAdminBase
-from ourlives.models import AppSettings, CodeType, ContactType, Country, InvitationCode, OrderType, Organization, Project, Rep, StripeEvent
+from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent
 
 
 def can_purchase(request):
@@ -105,6 +105,105 @@ class OrderTypeAdmin(OurlivesModelAdminBase):
     list_filter = ("active",)
     search_fields = ("code", "name")
     list_editable = ("active",)
+
+
+@admin.register(Currency)
+class CurrencyAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "payments"
+    list_display = ("code", "name", "exchange_rate", "active")
+    list_display_links = ("code",)
+    list_filter = ("active", "countries")
+    search_fields = ("code", "name")
+    list_editable = ("active",)
+    filter_horizontal = ("countries",)
+
+
+@admin.register(Product)
+class ProductAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "inventory_2"
+    list_display = ("name", "tier", "currency", "unit_price", "active")
+    list_display_links = ("name",)
+    list_filter = ("active", "tier", "currency")
+    search_fields = ("name", "tier", "currency__code", "currency__name")
+    autocomplete_fields = ("currency",)
+    list_editable = ("active",)
+
+
+@admin.register(Contact)
+class ContactAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "contact_mail"
+    list_display = ("first_name", "last_name", "email", "organization", "contact_type")
+    list_display_links = ("first_name",)
+    list_filter = ("contact_type", "organization")
+    search_fields = ("first_name", "last_name", "email", "organization__name")
+    autocomplete_fields = ("organization", "contact_type")
+
+
+@admin.register(OrganizationAddress)
+class OrganizationAddressAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "location_on"
+    list_display = ("organization", "line1", "city", "country", "is_primary")
+    list_display_links = ("line1",)
+    list_filter = ("is_primary", "country", "organization")
+    search_fields = ("line1", "city", "state", "zip", "organization__name", "country__name")
+    autocomplete_fields = ("organization", "country")
+    list_editable = ("is_primary",)
+
+
+class OrderItemInline(admin.TabularInline):
+    model = OrderItem
+    extra = 0
+    autocomplete_fields = ("product",)
+    readonly_fields = ("line_total_display",)
+
+    @admin.display(description="Line total")
+    def line_total_display(self, obj):
+        if obj.pk is None:
+            return "—"
+        return obj.line_total
+
+
+@admin.register(OrderItem)
+class OrderItemAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "list_alt"
+    list_display = ("order", "product", "quantity", "unit_price", "line_total_display")
+    list_display_links = ("order",)
+    list_filter = ("product",)
+    search_fields = ("order__order_number", "product__name")
+    autocomplete_fields = ("order", "product")
+    readonly_fields = ("line_total_display",)
+
+    @admin.display(description="Line total")
+    def line_total_display(self, obj):
+        if obj.pk is None:
+            return "—"
+        return obj.line_total
+
+
+@admin.register(Order)
+class OrderAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "receipt"
+    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at")
+    list_display_links = ("order_number",)
+    list_filter = ("order_types", "rep", "currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order")
+    search_fields = ("order_number", "po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email")
+    autocomplete_fields = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")
+    filter_horizontal = ("order_types",)
+    date_hierarchy = "submitted_at"
+    list_select_related = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")
+    inlines = (OrderItemInline,)
+    readonly_fields = ("total_agreed_price_display", "is_pilot_order_display")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("order_types")
+
+    @admin.display(description="Total agreed")
+    def total_agreed_price_display(self, obj):
+        return obj.total_agreed_price
+
+    @admin.display(description="Pilot", boolean=True)
+    def is_pilot_order_display(self, obj):
+        return obj.is_pilot_order
 
 
 @admin.register(AppSettings)

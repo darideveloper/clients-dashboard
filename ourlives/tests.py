@@ -1513,3 +1513,94 @@ class OrderLinkAlterationTests(TestCase):
         self.assertEqual(code.order, order)
         self.assertEqual(code.code_type, code_type)
         self.assertEqual(code.sequence, 3)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class CrmAdminRegistrationTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+        self.admin = User.objects.create_superuser("crm_admin", "crm@test.com", "x")
+        self.client = Client()
+        self.client.force_login(self.admin)
+
+    def test_changelists_render(self):
+        for url in ("currency", "product", "contact", "organizationaddress", "order", "orderitem"):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(f"/admin/ourlives/{url}/").status_code, 200)
+
+    def test_admin_options_match_spec(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import (
+            ContactAdmin,
+            CurrencyAdmin,
+            OrderAdmin,
+            OrderItemAdmin,
+            OrganizationAddressAdmin,
+            ProductAdmin,
+        )
+
+        ma = admin_site.site._registry[Currency]
+        self.assertIsInstance(ma, CurrencyAdmin)
+        self.assertEqual(tuple(ma.list_display), ("code", "name", "exchange_rate", "active"))
+        self.assertEqual(tuple(ma.list_filter), ("active", "countries"))
+        self.assertEqual(tuple(ma.search_fields), ("code", "name"))
+        self.assertEqual(tuple(ma.list_editable), ("active",))
+        self.assertEqual(tuple(ma.filter_horizontal), ("countries",))
+
+        ma = admin_site.site._registry[Product]
+        self.assertIsInstance(ma, ProductAdmin)
+        self.assertEqual(tuple(ma.list_display), ("name", "tier", "currency", "unit_price", "active"))
+        self.assertEqual(tuple(ma.autocomplete_fields), ("currency",))
+        self.assertEqual(tuple(ma.list_editable), ("active",))
+
+        ma = admin_site.site._registry[Contact]
+        self.assertIsInstance(ma, ContactAdmin)
+        self.assertEqual(tuple(ma.autocomplete_fields), ("organization", "contact_type"))
+
+        ma = admin_site.site._registry[OrganizationAddress]
+        self.assertIsInstance(ma, OrganizationAddressAdmin)
+        self.assertEqual(tuple(ma.autocomplete_fields), ("organization", "country"))
+        self.assertEqual(tuple(ma.list_editable), ("is_primary",))
+
+        ma = admin_site.site._registry[OrderItem]
+        self.assertIsInstance(ma, OrderItemAdmin)
+        self.assertEqual(tuple(ma.autocomplete_fields), ("order", "product"))
+        self.assertIn("line_total_display", ma.readonly_fields)
+
+        ma = admin_site.site._registry[Order]
+        self.assertIsInstance(ma, OrderAdmin)
+        self.assertEqual(tuple(ma.filter_horizontal), ("order_types",))
+        self.assertEqual(ma.date_hierarchy, "submitted_at")
+        self.assertIn("total_agreed_price_display", ma.readonly_fields)
+        self.assertIn("is_pilot_order_display", ma.readonly_fields)
+        self.assertEqual(len(ma.inlines), 1)
+
+    def test_export_actions_inherited(self):
+        from django.contrib import admin as admin_site
+
+        for model in (Currency, Product, Contact, OrganizationAddress, Order, OrderItem):
+            with self.subTest(model=model.__name__):
+                ma = admin_site.site._registry[model]
+                self.assertIn("export_selected", ma.actions)
+                self.assertIn("export_all", getattr(ma, "actions_list", []))
+
+    def test_address_inline_is_primary_toggle_persists(self):
+        org = Organization.objects.create(name="Toggle Org")
+        country = Country.objects.create(iso2="QX", iso3="QXX", name="Testland")
+        address = OrganizationAddress.objects.create(
+            organization=org, country=country,
+            line1="1 Test St", city="Testville", zip="12345",
+            is_primary=True,
+        )
+        self.client.post("/admin/ourlives/organizationaddress/", {
+            "form-TOTAL_FORMS": "1",
+            "form-INITIAL_FORMS": "1",
+            "form-0-id": str(address.pk),
+            "_save": "Save",
+        })
+        address.refresh_from_db()
+        self.assertFalse(address.is_primary)
