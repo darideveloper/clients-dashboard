@@ -1,0 +1,146 @@
+[
+  {
+    "model": "ourlives.Product",
+    "pk": 1,
+    "fields": {
+      "currency": 1,
+      "name": "US Micro Pilot",
+      "tier": "micro",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 2,
+    "fields": {
+      "currency": 1,
+      "name": "US Regional Pilot",
+      "tier": "regional",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 3,
+    "fields": {
+      "currency": 1,
+      "name": "US Enterprise Pilot",
+      "tier": "enterprise",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 4,
+    "fields": {
+      "currency": 4,
+      "name": "UK Micro Pilot",
+      "tier": "micro",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 5,
+    "fields": {
+      "currency": 4,
+      "name": "UK Regional Pilot",
+      "tier": "regional",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 6,
+    "fields": {
+      "currency": 4,
+      "name": "UK Enterprise Pilot",
+      "tier": "enterprise",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 7,
+    "fields": {
+      "currency": 8,
+      "name": "Canada Micro Pilot",
+      "tier": "micro",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 8,
+    "fields": {
+      "currency": 8,
+      "name": "Canada Regional Pilot",
+      "tier": "regional",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 9,
+    "fields": {
+      "currency": 8,
+      "name": "Canada Enterprise Pilot",
+      "tier": "enterprise",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 10,
+    "fields": {
+      "currency": 12,
+      "name": "South Africa Micro Pilot",
+      "tier": "micro",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 11,
+    "fields": {
+      "currency": 12,
+      "name": "South Africa Regional Pilot",
+      "tier": "regional",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  },
+  {
+    "model": "ourlives.Product",
+    "pk": 12,
+    "fields": {
+      "currency": 12,
+      "name": "South Africa Enterprise Pilot",
+      "tier": "enterprise",
+      "unit_price": "0.00",
+      "active": true,
+      "description": ""
+    }
+  }
+]

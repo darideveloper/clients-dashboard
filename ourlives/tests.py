@@ -1314,6 +1314,62 @@ class CurrencyFixtureTests(TestCase):
         self.assertEqual(product.currency, usd)
 
 
+class ProductFixtureTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+
+    def test_base_loaddata_seeds_twelve_products(self):
+        self.assertEqual(Product.objects.count(), 12)
+        self.assertTrue(all(p.active for p in Product.objects.all()))
+
+    def test_fixture_products_link_to_pilot_currencies(self):
+        links = {
+            (p.currency.code, p.tier): p.name
+            for p in Product.objects.select_related("currency").all()
+        }
+        self.assertEqual(links, {
+            ("USD", "micro"): "US Micro Pilot",
+            ("USD", "regional"): "US Regional Pilot",
+            ("USD", "enterprise"): "US Enterprise Pilot",
+            ("GBP", "micro"): "UK Micro Pilot",
+            ("GBP", "regional"): "UK Regional Pilot",
+            ("GBP", "enterprise"): "UK Enterprise Pilot",
+            ("CAD", "micro"): "Canada Micro Pilot",
+            ("CAD", "regional"): "Canada Regional Pilot",
+            ("CAD", "enterprise"): "Canada Enterprise Pilot",
+            ("ZAR", "micro"): "South Africa Micro Pilot",
+            ("ZAR", "regional"): "South Africa Regional Pilot",
+            ("ZAR", "enterprise"): "South Africa Enterprise Pilot",
+        })
+
+    def test_fixture_idempotent(self):
+        call_command("base_loaddata")
+        self.assertEqual(Product.objects.count(), 12)
+
+    def test_seeded_product_unblocks_order_item(self):
+        product = Product.objects.get(name="US Micro Pilot")
+        organization = Organization.objects.create(name="Test Org")
+        rep = Rep.objects.create(first_name="John", last_name="Doe", email="john@ourlivesapp.com")
+        order = Order.objects.create(organization=organization, rep=rep, po_number="PO-001")
+        item = OrderItem.objects.create(
+            order=order, product=product,
+            quantity=2, unit_price=Decimal("995.00"),
+        )
+        self.assertEqual(item.line_total, Decimal("1990.00"))
+        with self.assertRaises(ProtectedError):
+            product.delete()
+
+    def test_no_per_sale_fixture_rows(self):
+        self.assertEqual(Order.objects.count(), 0)
+        self.assertEqual(OrderItem.objects.count(), 0)
+        self.assertEqual(Contact.objects.count(), 0)
+        self.assertEqual(OrganizationAddress.objects.count(), 0)
+        self.assertEqual(Rep.objects.count(), 0)
+        self.assertEqual(InvitationCode.objects.count(), 0)
+        self.assertEqual(StripeEvent.objects.count(), 0)
+        self.assertEqual(AppSettings.get_solo().total_tokens, 0)
+
+
 class OrderTests(TestCase):
     def setUp(self):
         self.organization = Organization.objects.create(name="Test Org")
