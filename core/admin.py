@@ -104,4 +104,4 @@ class GroupAdmin(BaseGroupAdmin, ModelAdminUnfoldBase):
 
 @admin.register(TokenProxy)
 class TokenAdmin(ModelAdminUnfoldBase, BaseTokenAdmin):
-    sidebar_icon = "key"
+    sidebar_icon = "vpn_key"

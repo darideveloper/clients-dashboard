@@ -97,7 +97,7 @@ class CountryAdmin(OurlivesModelAdminBase):
 
 @admin.register(Rep)
 class RepAdmin(OurlivesModelAdminBase):
-    sidebar_icon = "person"
+    sidebar_icon = "badge"
     list_display = ("first_name", "last_name", "email")
     list_display_links = ("first_name",)
     search_fields = ("first_name", "last_name", "email")
