@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from django.urls import reverse_lazy
+
 from dotenv import load_dotenv
 from django.templatetags.static import static
 
@@ -267,8 +269,117 @@ UNFOLD = {
     },
     "SIDEBAR": {
         "show_search": True,
-        "show_all_applications": True,
+        "show_all_applications": False,
         "navigation": [
+            {
+                "title": "Our Lives",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Projects",
+                        "icon": "folder",
+                        "link": reverse_lazy("admin:ourlives_project_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_project"),
+                    },
+                    {
+                        "title": "Organizations",
+                        "icon": "business",
+                        "link": reverse_lazy("admin:ourlives_organization_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_organization"),
+                    },
+                    {
+                        "title": "Contacts",
+                        "icon": "contact_mail",
+                        "link": reverse_lazy("admin:ourlives_contact_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_contact"),
+                    },
+                    {
+                        "title": "Addresses",
+                        "icon": "location_on",
+                        "link": reverse_lazy("admin:ourlives_organizationaddress_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_organizationaddress"),
+                    },
+                    {
+                        "title": "Invitation Codes",
+                        "icon": "key",
+                        "link": reverse_lazy("admin:ourlives_invitationcode_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_invitationcode"),
+                    },
+                    {
+                        "title": "Orders",
+                        "icon": "receipt",
+                        "link": reverse_lazy("admin:ourlives_order_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_order"),
+                    },
+                    {
+                        "title": "Order Items",
+                        "icon": "list_alt",
+                        "link": reverse_lazy("admin:ourlives_orderitem_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_orderitem"),
+                    },
+                    {
+                        "title": "Reps",
+                        "icon": "person",
+                        "link": reverse_lazy("admin:ourlives_rep_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_rep"),
+                    },
+                    {
+                        "title": "App Settings",
+                        "icon": "settings",
+                        "link": reverse_lazy("admin:ourlives_appsettings_change"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_appsettings"),
+                    },
+                    {
+                        "title": "Stripe Events",
+                        "icon": "receipt_long",
+                        "link": reverse_lazy("admin:ourlives_stripeevent_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_stripeevent"),
+                    },
+                ],
+            },
+            {
+                "title": "Reference data",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Countries",
+                        "icon": "globe",
+                        "link": reverse_lazy("admin:ourlives_country_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_country"),
+                    },
+                    {
+                        "title": "Contact Types",
+                        "icon": "contacts",
+                        "link": reverse_lazy("admin:ourlives_contacttype_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_contacttype"),
+                    },
+                    {
+                        "title": "Code Types",
+                        "icon": "sell",
+                        "link": reverse_lazy("admin:ourlives_codetype_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_codetype"),
+                    },
+                    {
+                        "title": "Order Types",
+                        "icon": "shopping_bag",
+                        "link": reverse_lazy("admin:ourlives_ordertype_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_ordertype"),
+                    },
+                    {
+                        "title": "Currencies",
+                        "icon": "payments",
+                        "link": reverse_lazy("admin:ourlives_currency_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_currency"),
+                    },
+                    {
+                        "title": "Products",
+                        "icon": "inventory_2",
+                        "link": reverse_lazy("admin:ourlives_product_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_product"),
+                    },
+                ],
+            },
             {
                 "title": "Credits",
                 "separator": True,
@@ -278,6 +389,36 @@ UNFOLD = {
                         "icon": "shopping_cart",
                         "link": "/admin/ourlives/appsettings/purchase/",
                         "permission": "ourlives.admin.can_purchase",
+                    },
+                ],
+            },
+            {
+                "title": "Core",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Brands",
+                        "icon": "brand_family",
+                        "link": reverse_lazy("admin:core_brand_changelist"),
+                        "permission": lambda request: request.user.has_perm("core.view_brand"),
+                    },
+                    {
+                        "title": "Users",
+                        "icon": "person",
+                        "link": reverse_lazy("admin:auth_user_changelist"),
+                        "permission": lambda request: request.user.has_perm("auth.view_user"),
+                    },
+                    {
+                        "title": "Groups",
+                        "icon": "group",
+                        "link": reverse_lazy("admin:auth_group_changelist"),
+                        "permission": lambda request: request.user.has_perm("auth.view_group"),
+                    },
+                    {
+                        "title": "Tokens",
+                        "icon": "key",
+                        "link": reverse_lazy("admin:authtoken_tokenproxy_changelist"),
+                        "permission": lambda request: request.user.has_perm("authtoken.view_tokenproxy"),
                     },
                 ],
             },

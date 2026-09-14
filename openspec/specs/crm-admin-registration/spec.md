@@ -1,7 +1,7 @@
 # crm-admin-registration Specification
 
 ## Purpose
-Admin registration and changelist behavior for the six Phase-2/3 CRM models (`Currency`, `Product`, `Contact`, `OrganizationAddress`, `Order`, `OrderItem`) plus the `OrderItem` tabular inline. Created by archiving change register-missing-crm-admins.
+Admin registration and changelist behavior for the six Phase-2/3 CRM models (`Currency`, `Product`, `Contact`, `OrganizationAddress`, `Order`, `OrderItem`) plus Unfold inlines for child editing on the parent change forms (see `admin-inline-children`). Created by archiving change register-missing-crm-admins; inline coexistence by change admin-inline-models-sidebar; structured Order filters by change improve-order-admin-filters.
 ## Requirements
 ### Requirement: Currency admin registration
 
@@ -30,7 +30,7 @@ The system SHALL register `Product` in `ourlives/admin.py` as `ProductAdmin(Ourl
 
 ### Requirement: Contact admin registration
 
-The system SHALL register `Contact` in `ourlives/admin.py` as `ContactAdmin(OurlivesModelAdminBase)` with `sidebar_icon="contact_mail"`, `list_display=("first_name","last_name","email","organization","contact_type")`, `list_display_links=("first_name",)`, `list_filter=("contact_type","organization")`, `search_fields=("first_name","last_name","email","phone","organization__name")`, `autocomplete_fields=("organization","contact_type")` and full add/change/delete permissions.
+The system SHALL register `Contact` in `ourlives/admin.py` as `ContactAdmin(OurlivesModelAdminBase)` with `sidebar_icon="contact_mail"`, `list_display=("first_name","last_name","email","organization","contact_type")`, `list_display_links=("first_name",)`, `list_filter=("contact_type","organization")`, `search_fields=("first_name","last_name","email","phone","organization__name")`, `autocomplete_fields=("organization","contact_type")` and full add/change/delete permissions. Contacts are additionally editable via `ContactInline` on the Organization change form (see `admin-inline-children`).
 
 #### Scenario: Contact search across org
 
@@ -44,7 +44,7 @@ The system SHALL register `Contact` in `ourlives/admin.py` as `ContactAdmin(Ourl
 
 ### Requirement: OrganizationAddress admin registration
 
-The system SHALL register `OrganizationAddress` in `ourlives/admin.py` as `OrganizationAddressAdmin(OurlivesModelAdminBase)` with `sidebar_icon="location_on"`, `list_display=("organization","line1","city","country","is_primary")`, `list_display_links=("line1",)`, `list_filter=("is_primary","country","organization")`, `search_fields=("line1","line2","city","state","zip","organization__name")`, `autocomplete_fields=("organization","country")`, `list_editable=("is_primary",)` and full add/change/delete permissions.
+The system SHALL register `OrganizationAddress` in `ourlives/admin.py` as `OrganizationAddressAdmin(OurlivesModelAdminBase)` with `sidebar_icon="location_on"`, `list_display=("organization","line1","city","country","is_primary")`, `list_display_links=("line1",)`, `list_filter=("is_primary","country","organization")`, `search_fields=("line1","line2","city","state","zip","organization__name")`, `autocomplete_fields=("organization","country")`, `list_editable=("is_primary",)` and full add/change/delete permissions. Addresses are additionally editable via `OrganizationAddressInline` on the Organization change form (see `admin-inline-children`).
 
 #### Scenario: Primary address toggle
 
@@ -76,13 +76,11 @@ The system SHALL register `Order` in `ourlives/admin.py` as `OrderAdmin(Ourlives
 - **THEN** matching orders are returned
 - **WHEN** a staff user clicks a `pilot_currency` filter choice
 - **THEN** only orders with that pilot currency are shown
-
 ### Requirement: OrderItem admin registration and inline
 
-The system SHALL register `OrderItem` in `ourlives/admin.py` as `OrderItemAdmin(OurlivesModelAdminBase)` with `sidebar_icon="list_alt"`, `list_display=("order","product","quantity","unit_price","line_total_display")`, `list_display_links=("order",)`, `list_filter=("product",)`, `search_fields=("^order__order_number","product__name")`, `autocomplete_fields=("order","product")` and a readonly `line_total_display` (`@admin.display` over model `line_total`). The system SHALL also provide `OrderItemInline(admin.TabularInline)` with `extra=0`, `autocomplete_fields=("product",)` and readonly `line_total_display`, registered inside `OrderAdmin.inlines`.
+The system SHALL register `OrderItem` in `ourlives/admin.py` as `OrderItemAdmin(OurlivesModelAdminBase)` with `sidebar_icon="list_alt"`, `list_display=("order","product","quantity","unit_price","line_total_display")`, `list_display_links=("order",)`, `list_filter=("product",)`, `search_fields=("^order__order_number","product__name")`, `autocomplete_fields=("order","product")` and a readonly `line_total_display` (`@admin.display` over model `line_total`). The system SHALL also provide `OrderItemInline(unfold.admin.TabularInline)` with `extra=0`, `autocomplete_fields=("product",)` and readonly `line_total_display`, registered inside `OrderAdmin.inlines`.
 
 #### Scenario: Item line total shown
 
 - **WHEN** a staff user opens the OrderItem changelist or an Order change form
 - **THEN** each item shows `quantity × unit_price` as a readonly line total with order/product autocomplete in the form
-

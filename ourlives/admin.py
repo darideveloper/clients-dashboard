@@ -6,6 +6,8 @@ from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from solo.admin import SingletonModelAdmin
+from unfold.admin import StackedInline as UnfoldStackedInline
+from unfold.admin import TabularInline as UnfoldTabularInline
 from unfold.contrib.filters.admin import (
     AutocompleteSelectFilter,
     DropdownFilter,
@@ -30,6 +32,18 @@ class ProjectAdmin(OurlivesModelAdminBase):
     search_fields = ("name", "description")
 
 
+class ContactInline(UnfoldStackedInline):
+    model = Contact
+    extra = 0
+    autocomplete_fields = ("contact_type",)
+
+
+class OrganizationAddressInline(UnfoldStackedInline):
+    model = OrganizationAddress
+    extra = 0
+    autocomplete_fields = ("country",)
+
+
 @admin.register(Organization)
 class OrganizationAdmin(OurlivesModelAdminBase):
     sidebar_icon = "business"
@@ -37,6 +51,7 @@ class OrganizationAdmin(OurlivesModelAdminBase):
     list_display_links = ("name",)
     list_filter = ("assigned_rep",)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
+    inlines = (ContactInline, OrganizationAddressInline)
 
 
 @admin.register(InvitationCode)
@@ -161,7 +176,7 @@ class OrganizationAddressAdmin(OurlivesModelAdminBase):
     list_editable = ("is_primary",)
 
 
-class OrderItemInline(admin.TabularInline):
+class OrderItemInline(UnfoldTabularInline):
     model = OrderItem
     extra = 0
     autocomplete_fields = ("product",)
