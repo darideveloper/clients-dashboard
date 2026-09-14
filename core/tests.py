@@ -300,6 +300,19 @@ class SiteFaviconCallbackTests(TestCase):
             if self.brand.logo:
                 self.brand.logo.delete(save=False)
 
+    def test_authenticated_brand_with_logo_but_missing_favicon_returns_fallback(self):
+        Membership.objects.create(user=self.user, brand=self.brand)
+        self.brand.logo.save("logo.png", _make_test_image(), save=True)
+        try:
+            storage = self.brand.logo.storage
+            storage.delete(self.brand._favicon_storage_path())
+            request = self.factory.get("/")
+            request.user = self.user
+            self.assertEqual(site_favicon(request), "/static/favicon.png")
+        finally:
+            if self.brand.logo:
+                self.brand.logo.delete(save=False)
+
 
 class SiteTitleCallbackTests(TestCase):
     def setUp(self):

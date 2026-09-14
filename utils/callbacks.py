@@ -55,7 +55,11 @@ def site_favicon(request):
     if brand and brand.has_logo:
         url = brand.favicon_url
         if url:
-            return url
+            try:
+                if brand.logo.storage.exists(brand._favicon_storage_path()):
+                    return url
+            except Exception:
+                pass
     return static("favicon.png")
 
 
