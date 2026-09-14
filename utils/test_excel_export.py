@@ -159,8 +159,9 @@ class WorkbookBuildingTests(TestCase):
         # Create third project not referenced
         Project.objects.create(name="Gamma")
         wb = build_workbook_for_queryset(InvitationCode, qs, include_related=True)
-        # Main + Project + Organization = 3 sheets
-        self.assertEqual(len(wb.sheetnames), 3)
+        # Main + Project + Organization + Order + Code Type = 5 sheets
+        # (InvitationCode has four forward FKs: project, organization, order, code_type)
+        self.assertEqual(len(wb.sheetnames), 5)
         # Find Project sheet
         project_ws = None
         for name in wb.sheetnames:
@@ -237,12 +238,12 @@ class ExcelExportAdminTests(TestCase):
         wb = load_workbook(filename=io.BytesIO(response.content))
         self.assertEqual(len(wb.sheetnames), 1)
 
-    def test_export_with_related_returns_three_sheets(self):
+    def test_export_with_related_returns_five_sheets(self):
         url = reverse("admin:ourlives_invitationcode_changelist")
         response = self.client.post(url, {"action": "export_selected_with_related", "_selected_action": [self.code.pk]})
         self.assertEqual(response.status_code, 200)
         wb = load_workbook(filename=io.BytesIO(response.content))
-        self.assertEqual(len(wb.sheetnames), 3)
+        self.assertEqual(len(wb.sheetnames), 5)
 
     @override_settings(STORAGES={"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"}, "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}})
     def test_empty_selection_warns(self):

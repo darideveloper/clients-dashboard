@@ -4,6 +4,8 @@ from django.shortcuts import redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 from solo.admin import SingletonModelAdmin
+from unfold.admin import StackedInline as UnfoldStackedInline
+from unfold.admin import TabularInline as UnfoldTabularInline
 
 from project.admin_base import ModelAdminUnfoldBase, OurlivesExportMixin, OurlivesModelAdminBase
 from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent
@@ -21,6 +23,18 @@ class ProjectAdmin(OurlivesModelAdminBase):
     search_fields = ("name", "description")
 
 
+class ContactInline(UnfoldStackedInline):
+    model = Contact
+    extra = 0
+    autocomplete_fields = ("contact_type",)
+
+
+class OrganizationAddressInline(UnfoldStackedInline):
+    model = OrganizationAddress
+    extra = 0
+    autocomplete_fields = ("country",)
+
+
 @admin.register(Organization)
 class OrganizationAdmin(OurlivesModelAdminBase):
     sidebar_icon = "business"
@@ -28,6 +42,7 @@ class OrganizationAdmin(OurlivesModelAdminBase):
     list_display_links = ("name",)
     list_filter = ("assigned_rep",)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
+    inlines = (ContactInline, OrganizationAddressInline)
 
 
 @admin.register(InvitationCode)
@@ -131,48 +146,10 @@ class ProductAdmin(OurlivesModelAdminBase):
     list_editable = ("active",)
 
 
-@admin.register(Contact)
-class ContactAdmin(OurlivesModelAdminBase):
-    sidebar_icon = "contact_mail"
-    list_display = ("first_name", "last_name", "email", "organization", "contact_type")
-    list_display_links = ("first_name",)
-    list_filter = ("contact_type", "organization")
-    search_fields = ("first_name", "last_name", "email", "phone", "organization__name")
-    autocomplete_fields = ("organization", "contact_type")
-
-
-@admin.register(OrganizationAddress)
-class OrganizationAddressAdmin(OurlivesModelAdminBase):
-    sidebar_icon = "location_on"
-    list_display = ("organization", "line1", "city", "country", "is_primary")
-    list_display_links = ("line1",)
-    list_filter = ("is_primary", "country", "organization")
-    search_fields = ("line1", "line2", "city", "state", "zip", "organization__name")
-    autocomplete_fields = ("organization", "country")
-    list_editable = ("is_primary",)
-
-
-class OrderItemInline(admin.TabularInline):
+class OrderItemInline(UnfoldTabularInline):
     model = OrderItem
     extra = 0
     autocomplete_fields = ("product",)
-    readonly_fields = ("line_total_display",)
-
-    @admin.display(description="Line total")
-    def line_total_display(self, obj):
-        if obj.pk is None:
-            return "—"
-        return obj.line_total
-
-
-@admin.register(OrderItem)
-class OrderItemAdmin(OurlivesModelAdminBase):
-    sidebar_icon = "list_alt"
-    list_display = ("order", "product", "quantity", "unit_price", "line_total_display")
-    list_display_links = ("order",)
-    list_filter = ("product",)
-    search_fields = ("^order__order_number", "product__name")
-    autocomplete_fields = ("order", "product")
     readonly_fields = ("line_total_display",)
 
     @admin.display(description="Line total")
@@ -190,7 +167,7 @@ class OrderAdmin(OurlivesModelAdminBase):
     list_filter = ("order_types", "rep", "currency", "pilot_currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order")
     search_fields = ("^order_number", "^po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email", "primary_contact__last_name", "primary_contact__email", "invoice_contact__last_name", "invoice_contact__email", "referral_organisation")
     search_help_text = "Search by order/PO number, organization, rep, billing contact, or referral."
-    autocomplete_fields = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")
+    autocomplete_fields = ("organization", "rep", "currency", "pilot_currency")
     filter_horizontal = ("order_types",)
     date_hierarchy = "submitted_at"
     list_select_related = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")

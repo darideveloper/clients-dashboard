@@ -1623,7 +1623,7 @@ class CrmAdminRegistrationTests(TestCase):
         self.client.force_login(self.admin)
 
     def test_changelists_render(self):
-        for url in ("currency", "product", "contact", "organizationaddress", "order", "orderitem"):
+        for url in ("currency", "product", "order"):
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(f"/admin/ourlives/{url}/").status_code, 200)
 
@@ -1631,11 +1631,8 @@ class CrmAdminRegistrationTests(TestCase):
         from django.contrib import admin as admin_site
 
         from ourlives.admin import (
-            ContactAdmin,
             CurrencyAdmin,
             OrderAdmin,
-            OrderItemAdmin,
-            OrganizationAddressAdmin,
             ProductAdmin,
         )
 
@@ -1654,29 +1651,6 @@ class CrmAdminRegistrationTests(TestCase):
         self.assertEqual(tuple(ma.autocomplete_fields), ("currency",))
         self.assertEqual(tuple(ma.list_editable), ("active",))
 
-        ma = admin_site.site._registry[Contact]
-        self.assertIsInstance(ma, ContactAdmin)
-        self.assertEqual(
-            tuple(ma.search_fields),
-            ("first_name", "last_name", "email", "phone", "organization__name"),
-        )
-        self.assertEqual(tuple(ma.autocomplete_fields), ("organization", "contact_type"))
-
-        ma = admin_site.site._registry[OrganizationAddress]
-        self.assertIsInstance(ma, OrganizationAddressAdmin)
-        self.assertEqual(
-            tuple(ma.search_fields),
-            ("line1", "line2", "city", "state", "zip", "organization__name"),
-        )
-        self.assertEqual(tuple(ma.autocomplete_fields), ("organization", "country"))
-        self.assertEqual(tuple(ma.list_editable), ("is_primary",))
-
-        ma = admin_site.site._registry[OrderItem]
-        self.assertIsInstance(ma, OrderItemAdmin)
-        self.assertEqual(tuple(ma.search_fields), ("^order__order_number", "product__name"))
-        self.assertEqual(tuple(ma.autocomplete_fields), ("order", "product"))
-        self.assertIn("line_total_display", ma.readonly_fields)
-
         ma = admin_site.site._registry[Order]
         self.assertIsInstance(ma, OrderAdmin)
         self.assertEqual(
@@ -1689,21 +1663,57 @@ class CrmAdminRegistrationTests(TestCase):
         )
         self.assertTrue(ma.search_help_text)
         self.assertEqual(tuple(ma.filter_horizontal), ("order_types",))
+        # Contact is unregistered: contact FKs render as plain selects, not autocomplete
+        self.assertEqual(
+            tuple(ma.autocomplete_fields),
+            ("organization", "rep", "currency", "pilot_currency"),
+        )
         self.assertEqual(ma.date_hierarchy, "submitted_at")
         self.assertIn("total_agreed_price_display", ma.readonly_fields)
         self.assertIn("is_pilot_order_display", ma.readonly_fields)
         self.assertEqual(len(ma.inlines), 1)
 
+    def test_inline_classes_are_unfold(self):
+        from unfold.admin import StackedInline as UnfoldStackedInline
+        from unfold.admin import TabularInline as UnfoldTabularInline
+
+        from ourlives.admin import (
+            ContactInline,
+            OrganizationAddressInline,
+            OrderItemInline,
+        )
+
+        self.assertTrue(issubclass(ContactInline, UnfoldStackedInline))
+        self.assertTrue(issubclass(OrganizationAddressInline, UnfoldStackedInline))
+        self.assertTrue(issubclass(OrderItemInline, UnfoldTabularInline))
+        self.assertEqual(ContactInline.extra, 0)
+        self.assertEqual(OrganizationAddressInline.extra, 0)
+        self.assertEqual(OrderItemInline.extra, 0)
+
+        from django.contrib import admin as admin_site
+
+        self.assertEqual(
+            tuple(admin_site.site._registry[Organization].inlines),
+            (ContactInline, OrganizationAddressInline),
+        )
+
     def test_export_actions_inherited(self):
         from django.contrib import admin as admin_site
 
-        for model in (Currency, Product, Contact, OrganizationAddress, Order, OrderItem):
+        for model in (Currency, Product, Order):
             with self.subTest(model=model.__name__):
                 ma = admin_site.site._registry[model]
                 self.assertIn("export_selected", ma.actions)
                 self.assertIn("export_all", getattr(ma, "actions_list", []))
 
-    def test_address_inline_is_primary_toggle_persists(self):
+    def test_child_models_not_registered(self):
+        from django.contrib import admin as admin_site
+
+        for model in (Contact, OrganizationAddress, OrderItem):
+            with self.subTest(model=model.__name__):
+                self.assertNotIn(model, admin_site.site._registry)
+
+    def test_address_inline_toggle_via_organization_persists(self):
         org = Organization.objects.create(name="Toggle Org")
         country = Country.objects.create(iso2="QX", iso3="QXX", name="Testland")
         address = OrganizationAddress.objects.create(
@@ -1711,11 +1721,178 @@ class CrmAdminRegistrationTests(TestCase):
             line1="1 Test St", city="Testville", zip="12345",
             is_primary=True,
         )
-        self.client.post("/admin/ourlives/organizationaddress/", {
-            "form-TOTAL_FORMS": "1",
-            "form-INITIAL_FORMS": "1",
-            "form-0-id": str(address.pk),
+        change_url = f"/admin/ourlives/organization/{org.pk}/change/"
+        response = self.client.get(change_url)
+        self.assertEqual(response.status_code, 200)
+        prefixes = {
+            fs.formset.prefix: fs
+            for fs in response.context["inline_admin_formsets"]
+        }
+        self.assertEqual(set(prefixes), {"contacts", "addresses"})
+        addr_prefix = next(
+            prefix for prefix in prefixes
+            if f"{prefix}-0-is_primary" in response.content.decode()
+        )
+        contact_prefix = next(p for p in prefixes if p != addr_prefix)
+        data = {
+            "name": org.name,
+            "description": "",
+            "assigned_rep": "",
+            f"{contact_prefix}-TOTAL_FORMS": "0",
+            f"{contact_prefix}-INITIAL_FORMS": "0",
+            f"{contact_prefix}-MIN_NUM_FORMS": "0",
+            f"{contact_prefix}-MAX_NUM_FORMS": "1000",
+            f"{addr_prefix}-TOTAL_FORMS": "1",
+            f"{addr_prefix}-INITIAL_FORMS": "1",
+            f"{addr_prefix}-MIN_NUM_FORMS": "0",
+            f"{addr_prefix}-MAX_NUM_FORMS": "1000",
+            f"{addr_prefix}-0-id": str(address.pk),
+            f"{addr_prefix}-0-line1": address.line1,
+            f"{addr_prefix}-0-line2": "",
+            f"{addr_prefix}-0-city": address.city,
+            f"{addr_prefix}-0-state": "",
+            f"{addr_prefix}-0-zip": address.zip,
+            f"{addr_prefix}-0-country": str(country.pk),
             "_save": "Save",
-        })
+        }
+        response = self.client.post(change_url, data)
+        self.assertEqual(response.status_code, 302)
         address.refresh_from_db()
         self.assertFalse(address.is_primary)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class ChildOnlyAdminTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+        self.admin = User.objects.create_superuser("child_admin", "child@test.com", "x")
+        self.client = Client()
+        self.client.force_login(self.admin)
+
+    def test_removed_changelists_return_404(self):
+        for url in ("contact", "organizationaddress", "orderitem"):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(f"/admin/ourlives/{url}/").status_code, 404)
+
+    def test_organization_change_renders_both_inlines(self):
+        org = Organization.objects.create(name="Inline Org")
+        contact_type = ContactType.objects.get(code="billing")
+        Contact.objects.create(
+            organization=org, contact_type=contact_type,
+            first_name="Ada", last_name="Lovelace", email="ada@example.com",
+        )
+        response = self.client.get(f"/admin/ourlives/organization/{org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        formsets = {
+            fs.formset.prefix: fs
+            for fs in response.context["inline_admin_formsets"]
+        }
+        self.assertEqual(set(formsets), {"contacts", "addresses"})
+        self.assertEqual(formsets["contacts"].formset.total_form_count(), 1)
+        self.assertEqual(formsets["addresses"].formset.total_form_count(), 0)
+
+    def test_order_change_renders_items_inline(self):
+        org = Organization.objects.create(name="Order Org")
+        rep = Rep.objects.create(first_name="Jane", last_name="Doe", email="jane@ourlivesapp.com")
+        currency = Currency.objects.create(code="TST", name="Test Dollar", exchange_rate=Decimal("1.00"))
+        product = Product.objects.create(currency=currency, name="Scan", unit_price=Decimal("10.00"))
+        order = Order.objects.create(organization=org, rep=rep, po_number="PO-1")
+        OrderItem.objects.create(order=order, product=product, quantity=2, unit_price=Decimal("10.00"))
+        response = self.client.get(f"/admin/ourlives/order/{order.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        formsets = {
+            fs.formset.prefix: fs
+            for fs in response.context["inline_admin_formsets"]
+        }
+        self.assertEqual(set(formsets), {"items"})
+        self.assertEqual(formsets["items"].formset.total_form_count(), 1)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class SidebarCoverageTests(TestCase):
+    def _nav_links(self):
+        from django.conf import settings as django_settings
+
+        links = []
+
+        def walk(items):
+            for item in items:
+                if item.get("link"):
+                    links.append(str(item["link"]))
+                walk(item.get("items", []))
+
+        for group in django_settings.UNFOLD["SIDEBAR"]["navigation"]:
+            walk(group["items"])
+        return links
+
+    def test_sidebar_not_showing_all_applications(self):
+        from django.conf import settings as django_settings
+
+        self.assertFalse(django_settings.UNFOLD["SIDEBAR"]["show_all_applications"])
+
+    def test_every_registered_model_has_exactly_one_nav_entry(self):
+        from django.contrib import admin as admin_site
+        from django.urls import reverse
+
+        links = self._nav_links()
+        for model in admin_site.site._registry:
+            with self.subTest(model=model._meta.label):
+                if (
+                    model._meta.app_label == "ourlives"
+                    and model._meta.model_name == "appsettings"
+                ):
+                    url = reverse("admin:ourlives_appsettings_change")
+                else:
+                    url = reverse(
+                        f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"
+                    )
+                self.assertEqual(links.count(url), 1)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class SidebarPermissionTests(TestCase):
+    def setUp(self):
+        call_command("base_loaddata")
+        self.client = Client()
+
+    def _staff_with_perms(self, username, perms):
+        user = User.objects.create_user(username, f"{username}@test.com", "x", is_staff=True)
+        for perm in perms:
+            app_label, codename = perm.split(".")
+            user.user_permissions.add(
+                Permission.objects.get(content_type__app_label=app_label, codename=codename)
+            )
+        return user
+
+    def test_user_without_ourlives_perms_sees_no_ourlives_links(self):
+        user = self._staff_with_perms("noperms", [])
+        self.client.force_login(user)
+        response = self.client.get("/admin/")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"/admin/ourlives/", response.content)
+        self.assertEqual(self.client.get("/admin/ourlives/order/").status_code, 403)
+
+    def test_view_country_only_user_sees_only_countries(self):
+        user = self._staff_with_perms("countryonly", ["ourlives.view_country"])
+        self.client.force_login(user)
+        response = self.client.get("/admin/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"/admin/ourlives/country/", response.content)
+        self.assertNotIn(b"/admin/ourlives/order/", response.content)
+        self.assertEqual(self.client.get("/admin/ourlives/country/").status_code, 200)
+        self.assertEqual(self.client.get("/admin/ourlives/order/").status_code, 403)
+
+    def test_cross_app_user_blocked_from_ourlives_exports(self):
+        user = self._staff_with_perms("coreonly", ["core.view_brand"])
+        self.client.force_login(user)
+        response = self.client.post("/admin/ourlives/order/", {"action": "export_selected", "_selected_action": []})
+        self.assertEqual(response.status_code, 403)

@@ -1,32 +1,21 @@
-# crm-admin-registration Specification
+## REMOVED Requirements
 
-## Purpose
-Admin registration and changelist behavior for the Phase-2/3 CRM models (`Currency`, `Product`, `Order`) — `Contact`, `OrganizationAddress` and `OrderItem` are child-only models edited via Unfold inlines (see `admin-inline-children`) with no standalone registration. Created by archiving change register-missing-crm-admins; child-inline scope by change admin-inline-models-sidebar.
-## Requirements
-### Requirement: Currency admin registration
+### Requirement: Contact admin registration
 
-The system SHALL register `Currency` in `ourlives/admin.py` as `CurrencyAdmin(OurlivesModelAdminBase)` with `sidebar_icon="payments"`, `list_display=("code","name","exchange_rate","active")`, `list_display_links=("code",)`, `list_filter=("active","countries")`, `search_fields=("^code","name")`, `list_editable=("active",)`, `filter_horizontal=("countries",)` and full add/change/delete permissions.
+**Reason**: `Contact` is now a child-only model edited exclusively via `ContactInline` on the Organization page; a standalone changelist duplicates the workflow and clutters the sidebar.
+**Migration**: Manage contacts on the parent Organization change form; contact data remains in full-app Excel exports (discovered via `apps.get_models()`).
 
-#### Scenario: Currency changelist renders
+### Requirement: OrganizationAddress admin registration
 
-- **WHEN** a staff user with `ourlives` view permission opens `/admin/ourlives/currency/`
-- **THEN** rows show code, name, exchange rate and active flag with prefix search over code plus name search, filters for active and countries, and inline active toggles
+**Reason**: `OrganizationAddress` is now a child-only model edited exclusively via `OrganizationAddressInline` on the Organization page.
+**Migration**: Manage addresses on the parent Organization change form; address data remains in full-app Excel exports.
 
-### Requirement: Product admin registration
+### Requirement: OrderItem admin registration and inline
 
-The system SHALL register `Product` in `ourlives/admin.py` as `ProductAdmin(OurlivesModelAdminBase)` with `sidebar_icon="inventory_2"`, `list_display=("name","tier","currency","unit_price","active")`, `list_display_links=("name",)`, `list_filter=("active","tier","currency")`, `search_fields=("name","tier","description")`, `autocomplete_fields=("currency",)`, `list_editable=("active",)` and full add/change/delete permissions.
+**Reason**: `OrderItem` is now a child-only model edited exclusively via the Unfold `OrderItemInline` on the Order page; the standalone changelist and the Django-native inline class are superseded (see `admin-inline-children` capability).
+**Migration**: Manage line items on the parent Order change form; item data remains in full-app Excel exports.
 
-#### Scenario: Product filtered by currency
-
-- **WHEN** a staff user filters the Product changelist by a currency
-- **THEN** only products priced in that currency are shown and currency renders as an autocomplete widget in the change form
-
-#### Scenario: Product found by description not currency text
-
-- **WHEN** a staff user searches a description word in `/admin/ourlives/product/`
-- **THEN** matching products are returned
-- **WHEN** a staff user wants products of one currency
-- **THEN** the currency `list_filter` (not search) narrows the changelist
+## MODIFIED Requirements
 
 ### Requirement: Order admin registration with inline items
 
