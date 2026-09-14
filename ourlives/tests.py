@@ -1143,6 +1143,46 @@ class LookupAdminTests(TestCase):
         self.assertEqual(tuple(ma.list_editable), ("is_active",))
         self.assertEqual(self.client.get("/admin/ourlives/invitationcode/").status_code, 200)
 
+    def test_search_filter_tuning(self):
+        from django.contrib import admin as admin_site
+
+        ma = admin_site.site._registry[Project]
+        self.assertEqual(tuple(ma.search_fields), ("name", "description"))
+
+        ma = admin_site.site._registry[Organization]
+        self.assertEqual(tuple(ma.list_filter), ("assigned_rep",))
+        self.assertEqual(
+            tuple(ma.search_fields),
+            ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email"),
+        )
+
+        ma = admin_site.site._registry[InvitationCode]
+        self.assertEqual(
+            tuple(ma.list_filter), ("is_active", "project", "organization", "code_type")
+        )
+        self.assertEqual(
+            tuple(ma.search_fields),
+            ("^code", "project__name", "organization__name", "order__order_number", "code_type__code", "code_type__name"),
+        )
+        self.assertTrue(ma.search_help_text)
+
+        ma = admin_site.site._registry[Country]
+        self.assertEqual(tuple(ma.search_fields), ("^iso2", "^iso3", "name"))
+
+        for model in (ContactType, CodeType, OrderType):
+            with self.subTest(model=model.__name__):
+                self.assertEqual(
+                    tuple(admin_site.site._registry[model].search_fields),
+                    ("^code", "name", "description"),
+                )
+
+        ma = admin_site.site._registry[StripeEvent]
+        self.assertEqual(
+            tuple(ma.search_fields), ("=stripe_event_id", "source", "presentment_currency")
+        )
+        self.assertTrue(ma.search_help_text)
+        self.assertFalse(ma.has_add_permission(self.admin))
+
 
 class CurrencyTests(TestCase):
     def test_create_currency_with_countries(self):
@@ -1603,32 +1643,51 @@ class CrmAdminRegistrationTests(TestCase):
         self.assertIsInstance(ma, CurrencyAdmin)
         self.assertEqual(tuple(ma.list_display), ("code", "name", "exchange_rate", "active"))
         self.assertEqual(tuple(ma.list_filter), ("active", "countries"))
-        self.assertEqual(tuple(ma.search_fields), ("code", "name"))
+        self.assertEqual(tuple(ma.search_fields), ("^code", "name"))
         self.assertEqual(tuple(ma.list_editable), ("active",))
         self.assertEqual(tuple(ma.filter_horizontal), ("countries",))
 
         ma = admin_site.site._registry[Product]
         self.assertIsInstance(ma, ProductAdmin)
         self.assertEqual(tuple(ma.list_display), ("name", "tier", "currency", "unit_price", "active"))
+        self.assertEqual(tuple(ma.search_fields), ("name", "tier", "description"))
         self.assertEqual(tuple(ma.autocomplete_fields), ("currency",))
         self.assertEqual(tuple(ma.list_editable), ("active",))
 
         ma = admin_site.site._registry[Contact]
         self.assertIsInstance(ma, ContactAdmin)
+        self.assertEqual(
+            tuple(ma.search_fields),
+            ("first_name", "last_name", "email", "phone", "organization__name"),
+        )
         self.assertEqual(tuple(ma.autocomplete_fields), ("organization", "contact_type"))
 
         ma = admin_site.site._registry[OrganizationAddress]
         self.assertIsInstance(ma, OrganizationAddressAdmin)
+        self.assertEqual(
+            tuple(ma.search_fields),
+            ("line1", "line2", "city", "state", "zip", "organization__name"),
+        )
         self.assertEqual(tuple(ma.autocomplete_fields), ("organization", "country"))
         self.assertEqual(tuple(ma.list_editable), ("is_primary",))
 
         ma = admin_site.site._registry[OrderItem]
         self.assertIsInstance(ma, OrderItemAdmin)
+        self.assertEqual(tuple(ma.search_fields), ("^order__order_number", "product__name"))
         self.assertEqual(tuple(ma.autocomplete_fields), ("order", "product"))
         self.assertIn("line_total_display", ma.readonly_fields)
 
         ma = admin_site.site._registry[Order]
         self.assertIsInstance(ma, OrderAdmin)
+        self.assertEqual(
+            tuple(ma.list_filter),
+            ("order_types", "rep", "currency", "pilot_currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order"),
+        )
+        self.assertEqual(
+            tuple(ma.search_fields),
+            ("^order_number", "^po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email", "primary_contact__last_name", "primary_contact__email", "invoice_contact__last_name", "invoice_contact__email", "referral_organisation"),
+        )
+        self.assertTrue(ma.search_help_text)
         self.assertEqual(tuple(ma.filter_horizontal), ("order_types",))
         self.assertEqual(ma.date_hierarchy, "submitted_at")
         self.assertIn("total_agreed_price_display", ma.readonly_fields)

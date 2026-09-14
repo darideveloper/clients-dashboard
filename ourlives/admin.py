@@ -18,7 +18,7 @@ class ProjectAdmin(OurlivesModelAdminBase):
     sidebar_icon = "folder"
     list_display = ("name", "description")
     list_display_links = ("name",)
-    search_fields = ("name",)
+    search_fields = ("name", "description")
 
 
 @admin.register(Organization)
@@ -26,7 +26,8 @@ class OrganizationAdmin(OurlivesModelAdminBase):
     sidebar_icon = "business"
     list_display = ("name", "description")
     list_display_links = ("name",)
-    search_fields = ("name",)
+    list_filter = ("assigned_rep",)
+    search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
 
 
 @admin.register(InvitationCode)
@@ -34,8 +35,9 @@ class InvitationCodeAdmin(OurlivesModelAdminBase):
     sidebar_icon = "key"
     list_display = ("code", "project", "organization", "is_active", "max_use", "current_use", "usage_percentage")
     list_display_links = ("code",)
-    list_filter = ("is_active", "project", "organization")
-    search_fields = ("code", "project__name", "organization__name")
+    list_filter = ("is_active", "project", "organization", "code_type")
+    search_fields = ("^code", "project__name", "organization__name", "order__order_number", "code_type__code", "code_type__name")
+    search_help_text = "Search by code, project, organization, order number, or code type."
     readonly_fields = ("current_use",)
     autocomplete_fields = ("project", "organization")
     list_editable = ("is_active",)
@@ -59,7 +61,7 @@ class CountryAdmin(OurlivesModelAdminBase):
     list_display = ("iso2", "iso3", "name", "active")
     list_display_links = ("iso2",)
     list_filter = ("active",)
-    search_fields = ("iso2", "iso3", "name")
+    search_fields = ("^iso2", "^iso3", "name")
     list_editable = ("active",)
 
     def has_add_permission(self, request):
@@ -83,7 +85,7 @@ class ContactTypeAdmin(OurlivesModelAdminBase):
     list_display = ("code", "name", "active")
     list_display_links = ("code",)
     list_filter = ("active",)
-    search_fields = ("code", "name")
+    search_fields = ("^code", "name", "description")
     list_editable = ("active",)
 
 
@@ -93,7 +95,7 @@ class CodeTypeAdmin(OurlivesModelAdminBase):
     list_display = ("code", "name", "max_codes", "active")
     list_display_links = ("code",)
     list_filter = ("active",)
-    search_fields = ("code", "name")
+    search_fields = ("^code", "name", "description")
     list_editable = ("active",)
 
 
@@ -103,7 +105,7 @@ class OrderTypeAdmin(OurlivesModelAdminBase):
     list_display = ("code", "name", "active")
     list_display_links = ("code",)
     list_filter = ("active",)
-    search_fields = ("code", "name")
+    search_fields = ("^code", "name", "description")
     list_editable = ("active",)
 
 
@@ -113,7 +115,7 @@ class CurrencyAdmin(OurlivesModelAdminBase):
     list_display = ("code", "name", "exchange_rate", "active")
     list_display_links = ("code",)
     list_filter = ("active", "countries")
-    search_fields = ("code", "name")
+    search_fields = ("^code", "name")
     list_editable = ("active",)
     filter_horizontal = ("countries",)
 
@@ -124,7 +126,7 @@ class ProductAdmin(OurlivesModelAdminBase):
     list_display = ("name", "tier", "currency", "unit_price", "active")
     list_display_links = ("name",)
     list_filter = ("active", "tier", "currency")
-    search_fields = ("name", "tier", "currency__code", "currency__name")
+    search_fields = ("name", "tier", "description")
     autocomplete_fields = ("currency",)
     list_editable = ("active",)
 
@@ -135,7 +137,7 @@ class ContactAdmin(OurlivesModelAdminBase):
     list_display = ("first_name", "last_name", "email", "organization", "contact_type")
     list_display_links = ("first_name",)
     list_filter = ("contact_type", "organization")
-    search_fields = ("first_name", "last_name", "email", "organization__name")
+    search_fields = ("first_name", "last_name", "email", "phone", "organization__name")
     autocomplete_fields = ("organization", "contact_type")
 
 
@@ -145,7 +147,7 @@ class OrganizationAddressAdmin(OurlivesModelAdminBase):
     list_display = ("organization", "line1", "city", "country", "is_primary")
     list_display_links = ("line1",)
     list_filter = ("is_primary", "country", "organization")
-    search_fields = ("line1", "city", "state", "zip", "organization__name", "country__name")
+    search_fields = ("line1", "line2", "city", "state", "zip", "organization__name")
     autocomplete_fields = ("organization", "country")
     list_editable = ("is_primary",)
 
@@ -169,7 +171,7 @@ class OrderItemAdmin(OurlivesModelAdminBase):
     list_display = ("order", "product", "quantity", "unit_price", "line_total_display")
     list_display_links = ("order",)
     list_filter = ("product",)
-    search_fields = ("order__order_number", "product__name")
+    search_fields = ("^order__order_number", "product__name")
     autocomplete_fields = ("order", "product")
     readonly_fields = ("line_total_display",)
 
@@ -185,8 +187,9 @@ class OrderAdmin(OurlivesModelAdminBase):
     sidebar_icon = "receipt"
     list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at")
     list_display_links = ("order_number",)
-    list_filter = ("order_types", "rep", "currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order")
-    search_fields = ("order_number", "po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email")
+    list_filter = ("order_types", "rep", "currency", "pilot_currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order")
+    search_fields = ("^order_number", "^po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email", "primary_contact__last_name", "primary_contact__email", "invoice_contact__last_name", "invoice_contact__email", "referral_organisation")
+    search_help_text = "Search by order/PO number, organization, rep, billing contact, or referral."
     autocomplete_fields = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")
     filter_horizontal = ("order_types",)
     date_hierarchy = "submitted_at"
@@ -311,6 +314,8 @@ class StripeEventAdmin(OurlivesModelAdminBase):
     sidebar_icon = "receipt_long"
     list_display = ("stripe_event_id", "source", "token_count", "amount_cents", "presentment_currency", "presentment_amount", "handled_at")
     list_filter = ("presentment_currency",)
+    search_fields = ("=stripe_event_id", "source", "presentment_currency")
+    search_help_text = "Search by event ID, source, or presentment currency."
     readonly_fields = ("stripe_event_id", "source", "token_count", "amount_cents", "presentment_currency", "presentment_amount", "handled_at")
 
     def has_add_permission(self, request):
