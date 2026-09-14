@@ -1,9 +1,18 @@
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
+from django.core.validators import EMPTY_VALUES
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.translation import gettext_lazy as _
 from solo.admin import SingletonModelAdmin
+from unfold.contrib.filters.admin import (
+    AutocompleteSelectFilter,
+    DropdownFilter,
+    FieldTextFilter,
+    RangeDateTimeFilter,
+    RelatedDropdownFilter,
+)
 
 from project.admin_base import ModelAdminUnfoldBase, OurlivesExportMixin, OurlivesModelAdminBase
 from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent
@@ -182,12 +191,48 @@ class OrderItemAdmin(OurlivesModelAdminBase):
         return obj.line_total
 
 
+class OrderProductFilter(DropdownFilter):
+    title = _("product")
+    parameter_name = "product"
+
+    def lookups(self, request, model_admin):
+        return [(p.pk, str(p)) for p in Product.objects.order_by("name")]
+
+    def queryset(self, request, queryset):
+        if self.value() not in EMPTY_VALUES:
+            return queryset.filter(items__product__id=self.value()).distinct()
+        return queryset
+
+
+class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
+    def field_choices(self, field, request, model_admin):
+        return [
+            (c.pk, str(c))
+            for c in field.related_model.objects.filter(active=True).order_by("code")
+        ]
+
+
 @admin.register(Order)
 class OrderAdmin(OurlivesModelAdminBase):
     sidebar_icon = "receipt"
     list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at")
     list_display_links = ("order_number",)
-    list_filter = ("order_types", "rep", "currency", "pilot_currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order")
+    list_filter = (
+        ("organization", AutocompleteSelectFilter),
+        ("rep", AutocompleteSelectFilter),
+        ("primary_contact", AutocompleteSelectFilter),
+        ("invoice_contact", AutocompleteSelectFilter),
+        OrderProductFilter,
+        ("submitted_at", RangeDateTimeFilter),
+        ("referral_organisation", FieldTextFilter),
+        "order_types",
+        "hcaptcha_verified",
+        "is_upgrade_from_pilot",
+        "is_referral_order",
+        ("currency", ActiveCurrencyDropdownFilter),
+        ("pilot_currency", ActiveCurrencyDropdownFilter),
+    )
+    list_filter_submit = True
     search_fields = ("^order_number", "^po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email", "primary_contact__last_name", "primary_contact__email", "invoice_contact__last_name", "invoice_contact__email", "referral_organisation")
     search_help_text = "Search by order/PO number, organization, rep, billing contact, or referral."
     autocomplete_fields = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")

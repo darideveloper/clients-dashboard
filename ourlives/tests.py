@@ -6,7 +6,7 @@ from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models.deletion import ProtectedError
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.urls import reverse
 
 from ourlives.models import (
@@ -1679,10 +1679,35 @@ class CrmAdminRegistrationTests(TestCase):
 
         ma = admin_site.site._registry[Order]
         self.assertIsInstance(ma, OrderAdmin)
+        from ourlives.admin import (
+            ActiveCurrencyDropdownFilter,
+            OrderProductFilter,
+        )
+        from unfold.contrib.filters.admin import (
+            AutocompleteSelectFilter,
+            FieldTextFilter,
+            RangeDateTimeFilter,
+        )
+
         self.assertEqual(
             tuple(ma.list_filter),
-            ("order_types", "rep", "currency", "pilot_currency", "hcaptcha_verified", "is_upgrade_from_pilot", "is_referral_order"),
+            (
+                ("organization", AutocompleteSelectFilter),
+                ("rep", AutocompleteSelectFilter),
+                ("primary_contact", AutocompleteSelectFilter),
+                ("invoice_contact", AutocompleteSelectFilter),
+                OrderProductFilter,
+                ("submitted_at", RangeDateTimeFilter),
+                ("referral_organisation", FieldTextFilter),
+                "order_types",
+                "hcaptcha_verified",
+                "is_upgrade_from_pilot",
+                "is_referral_order",
+                ("currency", ActiveCurrencyDropdownFilter),
+                ("pilot_currency", ActiveCurrencyDropdownFilter),
+            ),
         )
+        self.assertTrue(ma.list_filter_submit)
         self.assertEqual(
             tuple(ma.search_fields),
             ("^order_number", "^po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email", "primary_contact__last_name", "primary_contact__email", "invoice_contact__last_name", "invoice_contact__email", "referral_organisation"),
@@ -1719,3 +1744,178 @@ class CrmAdminRegistrationTests(TestCase):
         })
         address.refresh_from_db()
         self.assertFalse(address.is_primary)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class OrderAdminFilterTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("filter_admin", "f@test.com", "x")
+        self.client = Client()
+        self.client.force_login(self.admin)
+
+        self.org_a = Organization.objects.create(name="Org A")
+        self.org_b = Organization.objects.create(name="Org B")
+        self.rep_a = Rep.objects.create(first_name="Ann", last_name="A", email="a@test.com")
+        self.rep_b = Rep.objects.create(first_name="Bob", last_name="B", email="b@test.com")
+        ct = ContactType.objects.create(code="billing", name="Billing")
+        self.contact_p = Contact.objects.create(
+            organization=self.org_a, contact_type=ct,
+            first_name="Pam", last_name="Primary", email="pam@test.com",
+        )
+        self.contact_i = Contact.objects.create(
+            organization=self.org_a, contact_type=ct,
+            first_name="Ivan", last_name="Invoice", email="ivan@test.com",
+        )
+        self.contact_other = Contact.objects.create(
+            organization=self.org_b, contact_type=ct,
+            first_name="Olive", last_name="Other", email="olive@test.com",
+        )
+        self.usd = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
+        self.eur = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("0.92"))
+        self.xxx = Currency.objects.create(
+            code="XXX", name="Retired", exchange_rate=Decimal("1.00"), active=False,
+        )
+        self.prod_active = Product.objects.create(
+            currency=self.usd, name="Active Widget", unit_price=Decimal("10.00"),
+        )
+        self.prod_legacy = Product.objects.create(
+            currency=self.usd, name="Legacy Widget", unit_price=Decimal("5.00"), active=False,
+        )
+        self.order1 = Order.objects.create(
+            organization=self.org_a, rep=self.rep_a, po_number="PO-1",
+            primary_contact=self.contact_p, invoice_contact=self.contact_i,
+            currency=self.usd, referral_organisation="Acme Holdings",
+        )
+        OrderItem.objects.create(
+            order=self.order1, product=self.prod_active,
+            quantity=1, unit_price=Decimal("10.00"),
+        )
+        OrderItem.objects.create(
+            order=self.order1, product=self.prod_active,
+            quantity=2, unit_price=Decimal("10.00"),
+        )
+        self.order2 = Order.objects.create(
+            organization=self.org_b, rep=self.rep_b, po_number="PO-2",
+            primary_contact=self.contact_other, currency=self.eur,
+            pilot_currency=self.usd, referral_organisation="Beta Ltd",
+        )
+        OrderItem.objects.create(
+            order=self.order2, product=self.prod_legacy,
+            quantity=1, unit_price=Decimal("5.00"),
+        )
+        self.order3 = Order.objects.create(
+            organization=self.org_a, rep=self.rep_b, po_number="PO-3",
+        )
+
+    def _changelist_pks(self, params):
+        response = self.client.get("/admin/ourlives/order/", params)
+        self.assertEqual(response.status_code, 200)
+        return {o.pk for o in response.context["cl"].result_list}
+
+    def test_filter_by_company(self):
+        self.assertEqual(
+            self._changelist_pks({"organization__id__exact": str(self.org_a.pk)}),
+            {self.order1.pk, self.order3.pk},
+        )
+
+    def test_filter_by_rep(self):
+        self.assertEqual(
+            self._changelist_pks({"rep__id__exact": str(self.rep_b.pk)}),
+            {self.order2.pk, self.order3.pk},
+        )
+
+    def test_contact_filters_are_independent_and_compose(self):
+        self.assertEqual(
+            self._changelist_pks({"primary_contact__id__exact": str(self.contact_p.pk)}),
+            {self.order1.pk},
+        )
+        self.assertEqual(
+            self._changelist_pks({"invoice_contact__id__exact": str(self.contact_i.pk)}),
+            {self.order1.pk},
+        )
+        self.assertEqual(
+            self._changelist_pks({
+                "primary_contact__id__exact": str(self.contact_p.pk),
+                "invoice_contact__id__exact": str(self.contact_other.pk),
+            }),
+            set(),
+        )
+
+    def test_filter_by_product_single_and_deduped(self):
+        pks = self._changelist_pks({"product": str(self.prod_active.pk)})
+        self.assertEqual(pks, {self.order1.pk})
+        response = self.client.get("/admin/ourlives/order/", {"product": str(self.prod_active.pk)})
+        self.assertEqual(len(response.context["cl"].result_list), 1)
+        self.assertEqual(
+            self._changelist_pks({"product": str(self.prod_legacy.pk)}),
+            {self.order2.pk},
+        )
+
+    def test_product_lookups_include_inactive(self):
+        from ourlives.admin import OrderProductFilter
+
+        filt = OrderProductFilter(None, {}, Order, None)
+        pks = {pk for pk, _label in filt.lookups(None, None)}
+        self.assertIn(self.prod_active.pk, pks)
+        self.assertIn(self.prod_legacy.pk, pks)
+
+    def test_filter_by_submitted_range(self):
+        wide = {
+            "submitted_at_from_0": "2000-01-01", "submitted_at_from_1": "00:00:00",
+            "submitted_at_to_0": "2100-01-01", "submitted_at_to_1": "00:00:00",
+        }
+        self.assertEqual(
+            self._changelist_pks(wide),
+            {self.order1.pk, self.order2.pk, self.order3.pk},
+        )
+        future = {
+            "submitted_at_from_0": "2100-01-01", "submitted_at_from_1": "00:00:00",
+            "submitted_at_to_0": "2101-01-01", "submitted_at_to_1": "00:00:00",
+        }
+        self.assertEqual(self._changelist_pks(future), set())
+
+    def test_filter_by_referral_fragment(self):
+        self.assertEqual(
+            self._changelist_pks({"referral_organisation__icontains": "acme"}),
+            {self.order1.pk},
+        )
+
+    def test_date_hierarchy_drills_down(self):
+        year = str(self.order1.submitted_at.year)
+        self.assertEqual(
+            self._changelist_pks({"submitted_at__year": year}),
+            {self.order1.pk, self.order2.pk, self.order3.pk},
+        )
+        self.assertEqual(self._changelist_pks({"submitted_at__year": "1999"}), set())
+
+    def test_filter_by_currency_and_active_only_choices(self):
+        self.assertEqual(
+            self._changelist_pks({"currency__id__exact": str(self.usd.pk)}),
+            {self.order1.pk},
+        )
+        self.assertEqual(
+            self._changelist_pks({"currency__id__exact": str(self.eur.pk)}),
+            {self.order2.pk},
+        )
+        self.assertEqual(
+            self._changelist_pks({"pilot_currency__id__exact": str(self.usd.pk)}),
+            {self.order2.pk},
+        )
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import ActiveCurrencyDropdownFilter
+
+        ma = admin_site.site._registry[Order]
+        choices = ActiveCurrencyDropdownFilter.field_choices(
+            None, Order._meta.get_field("currency"), None, ma,
+        )
+        self.assertEqual({pk for pk, _label in choices}, {self.usd.pk, self.eur.pk})
+
+    def test_search_by_order_number(self):
+        self.assertEqual(
+            self._changelist_pks({"q": self.order1.order_number}),
+            {self.order1.pk},
+        )
