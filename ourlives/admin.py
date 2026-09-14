@@ -16,7 +16,7 @@ from unfold.contrib.filters.admin import (
     RelatedDropdownFilter,
 )
 
-from project.admin_base import ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase
+from project.admin_base import ChangeRequestStashMixin, ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase, paginate_related, plural, related_footer, related_list, related_rows
 from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent
 
 
@@ -45,7 +45,7 @@ class OrganizationAddressInline(UnfoldStackedInline):
 
 
 @admin.register(Organization)
-class OrganizationAdmin(OrderSummaryAdminMixin, OurlivesModelAdminBase):
+class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "business"
     list_display = ("name", "description") + OrderSummaryAdminMixin.order_summary_displays
     list_display_links = ("name",)
@@ -55,8 +55,38 @@ class OrganizationAdmin(OrderSummaryAdminMixin, OurlivesModelAdminBase):
     fieldsets = (
         (None, {"fields": ("name", "description", "assigned_rep")}),
         ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
+        ("Orders", {"fields": ("orders_list",)}),
     )
-    readonly_fields = OrderSummaryAdminMixin.order_summary_displays
+    readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("orders_list",)
+
+    @admin.display(description="Orders")
+    def orders_list(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        request = getattr(self, "_change_request", None)
+        total = obj.orders.count()
+        if total == 0:
+            return "No orders yet"
+        if request is not None and not request.user.has_perm("ourlives.view_order"):
+            return f"{plural(total, 'order')}"
+        page = paginate_related(
+            self, obj.orders.order_by("order_number"), "org_orders_page"
+        )
+        rows = related_rows(
+            format_html(
+                '<a href="{}">{} — {} — {}</a>',
+                reverse("admin:ourlives_order_change", args=[o.pk]),
+                o.order_number,
+                o.po_number,
+                o.total_agreed_price,
+            )
+            for o in page.object_list
+        )
+        view_all = (
+            reverse("admin:ourlives_order_changelist")
+            + f"?organization__id__exact={obj.pk}"
+        )
+        return related_list(rows, related_footer(self, obj, page, "org_orders_page", view_all, f"View all {plural(total, 'order')}"))
 
 
 @admin.register(InvitationCode)
@@ -101,7 +131,7 @@ class CountryAdmin(OurlivesModelAdminBase):
 
 
 @admin.register(Rep)
-class RepAdmin(OrderSummaryAdminMixin, OurlivesModelAdminBase):
+class RepAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "badge"
     list_display = ("first_name", "last_name", "email") + OrderSummaryAdminMixin.order_summary_displays
     list_display_links = ("first_name",)
@@ -109,8 +139,69 @@ class RepAdmin(OrderSummaryAdminMixin, OurlivesModelAdminBase):
     fieldsets = (
         (None, {"fields": ("first_name", "last_name", "email")}),
         ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
+        ("Companies", {"fields": ("companies_list",)}),
+        ("Orders", {"fields": ("orders_list",)}),
     )
-    readonly_fields = OrderSummaryAdminMixin.order_summary_displays
+    readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("companies_list", "orders_list")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("organizations", "orders")
+
+    @admin.display(description="Companies")
+    def companies_list(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        request = getattr(self, "_change_request", None)
+        total = obj.organizations.count()
+        if total == 0:
+            return "No companies yet"
+        if request is not None and not request.user.has_perm("ourlives.view_organization"):
+            return f"{plural(total, 'company', 'companies')}"
+        page = paginate_related(
+            self, obj.organizations.order_by("name"), "rep_companies_page"
+        )
+        rows = related_rows(
+            format_html(
+                '<a href="{}">{}</a>',
+                reverse("admin:ourlives_organization_change", args=[o.pk]),
+                o.name,
+            )
+            for o in page.object_list
+        )
+        view_all = (
+            reverse("admin:ourlives_organization_changelist")
+            + f"?assigned_rep__id__exact={obj.pk}"
+        )
+        return related_list(rows, related_footer(self, obj, page, "rep_companies_page", view_all, f"View all {plural(total, 'company', 'companies')}"))
+
+    @admin.display(description="Orders")
+    def orders_list(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        request = getattr(self, "_change_request", None)
+        total = obj.orders.count()
+        if total == 0:
+            return "No orders yet"
+        if request is not None and not request.user.has_perm("ourlives.view_order"):
+            return f"{plural(total, 'order')}"
+        page = paginate_related(
+            self,
+            obj.orders.select_related("organization").order_by("order_number"),
+            "rep_orders_page",
+        )
+        rows = related_rows(
+            format_html(
+                '<a href="{}">{} — {}</a>',
+                reverse("admin:ourlives_order_change", args=[o.pk]),
+                o.order_number,
+                o.organization.name,
+            )
+            for o in page.object_list
+        )
+        view_all = (
+            reverse("admin:ourlives_order_changelist") + f"?rep__id__exact={obj.pk}"
+        )
+        return related_list(rows, related_footer(self, obj, page, "rep_orders_page", view_all, f"View all {plural(total, 'order')}"))
 
 
 @admin.register(ContactType)
@@ -238,7 +329,7 @@ class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
 
 
 @admin.register(Order)
-class OrderAdmin(OurlivesModelAdminBase):
+class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
     sidebar_icon = "receipt"
     list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at")
     list_display_links = ("order_number",)
@@ -265,10 +356,42 @@ class OrderAdmin(OurlivesModelAdminBase):
     date_hierarchy = "submitted_at"
     list_select_related = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")
     inlines = (OrderItemInline,)
-    readonly_fields = ("total_agreed_price_display", "is_pilot_order_display")
+    fieldsets = (
+        ("Order", {
+            "fields": (
+                "order_number", "organization", "rep", "primary_contact",
+                "invoice_contact", "order_types", "currency", "pilot_currency",
+                "po_number", "number_of_scans", "cost_per_scan",
+            ),
+        }),
+        ("Terms", {
+            "fields": (
+                "is_upgrade_from_pilot", "is_referral_order", "referral_organisation",
+                "hcaptcha_verified", "is_pilot_order_display",
+                "total_agreed_price_display", "submitted_at",
+            ),
+        }),
+        ("Details", {
+            "fields": ("additional_information", "ip_address", "form_entry_key"),
+        }),
+        ("Related", {
+            "fields": ("rep_card", "contacts_list", "codes_list"),
+        }),
+    )
+    readonly_fields = (
+        "total_agreed_price_display", "is_pilot_order_display", "submitted_at",
+        "rep_card", "contacts_list", "codes_list",
+    )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).prefetch_related("order_types")
+        return (
+            super().get_queryset(request)
+            .select_related(
+                "organization", "rep", "primary_contact", "invoice_contact",
+                "currency", "pilot_currency",
+            )
+            .prefetch_related("order_types")
+        )
 
     @admin.display(description="Total agreed")
     def total_agreed_price_display(self, obj):
@@ -277,6 +400,87 @@ class OrderAdmin(OurlivesModelAdminBase):
     @admin.display(description="Pilot", boolean=True)
     def is_pilot_order_display(self, obj):
         return obj.is_pilot_order
+
+    @admin.display(description="Rep")
+    def rep_card(self, obj):
+        if obj is None or obj.pk is None or obj.rep is None:
+            return "—"
+        rep = obj.rep
+        request = getattr(self, "_change_request", None)
+        if request is not None and not request.user.has_perm("ourlives.view_rep"):
+            return format_html("{} (details restricted)", str(rep))
+        change_url = reverse("admin:ourlives_rep_change", args=[rep.pk])
+        return format_html(
+            '<a href="{}">{}</a><br><a href="mailto:{}">{}</a>'
+            "<br>{} companies · {} orders<br>"
+            '<a href="{}">Open rep →</a>',
+            change_url, str(rep), rep.email, rep.email,
+            rep.organizations.count(), rep.orders.count(), change_url,
+        )
+
+    @admin.display(description="All organization contacts")
+    def contacts_list(self, obj):
+        if obj is None or obj.pk is None or obj.organization_id is None:
+            return "—"
+        request = getattr(self, "_change_request", None)
+        qs = (
+            obj.organization.contacts.select_related("contact_type")
+            .order_by("last_name", "first_name")
+        )
+        total = qs.count()
+        if total == 0:
+            return "No contacts yet"
+        if request is not None and not request.user.has_perm("ourlives.view_contact"):
+            return f"{plural(total, 'contact')}"
+        page = paginate_related(self, qs, "order_contacts_page")
+        rows = related_rows(
+            format_html(
+                '<a href="{}">{} {}</a> — {} — {} — {}{}',
+                reverse("admin:ourlives_contact_change", args=[c.pk]),
+                c.first_name, c.last_name,
+                c.contact_type.name, c.email, c.phone,
+                format_html(
+                    "{}{}",
+                    " (primary)" if c.pk == obj.primary_contact_id else "",
+                    " (invoice)" if c.pk == obj.invoice_contact_id else "",
+                ),
+            )
+            for c in page.object_list
+        )
+        view_all = (
+            reverse("admin:ourlives_contact_changelist")
+            + f"?organization__id__exact={obj.organization_id}"
+        )
+        return related_list(rows, related_footer(self, obj, page, "order_contacts_page", view_all, f"View all {plural(total, 'contact')}"))
+
+    @admin.display(description="Codes")
+    def codes_list(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        request = getattr(self, "_change_request", None)
+        qs = obj.invitation_codes.select_related("project", "code_type").order_by("code")
+        total = qs.count()
+        if total == 0:
+            return "No codes yet"
+        if request is not None and not request.user.has_perm("ourlives.view_invitationcode"):
+            return f"{plural(total, 'code')}"
+        page = paginate_related(self, qs, "order_codes_page")
+        rows = related_rows(
+            format_html(
+                '<a href="{}">{}</a> — {} — {} — {}/{}',
+                reverse("admin:ourlives_invitationcode_change", args=[c.pk]),
+                c.code,
+                c.project.name,
+                c.code_type.name if c.code_type is not None else "—",
+                c.current_use, c.max_use,
+            )
+            for c in page.object_list
+        )
+        view_all = (
+            reverse("admin:ourlives_invitationcode_changelist")
+            + f"?order__id__exact={obj.pk}"
+        )
+        return related_list(rows, related_footer(self, obj, page, "order_codes_page", view_all, f"View all {plural(total, 'code')}"))
 
 
 @admin.register(AppSettings)
