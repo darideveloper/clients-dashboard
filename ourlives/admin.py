@@ -56,8 +56,10 @@ class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, Ourlive
         (None, {"fields": ("name", "description", "assigned_rep")}),
         ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
         ("Orders", {"fields": ("orders_list",)}),
+        ("Codes across orders", {"fields": ("codes_across_orders_list",)}),
+        ("Codes (direct)", {"fields": ("codes_direct_list",)}),
     )
-    readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("orders_list",)
+    readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("orders_list", "codes_across_orders_list", "codes_direct_list")
 
     @admin.display(description="Orders")
     def orders_list(self, obj):
@@ -87,6 +89,55 @@ class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, Ourlive
             + f"?organization__id__exact={obj.pk}"
         )
         return related_list(rows, related_footer(self, obj, page, "org_orders_page", view_all, f"View all {plural(total, 'order')}"))
+
+    def _org_codes_list(self, obj, queryset, page_key, view_all_query):
+        if obj is None or obj.pk is None:
+            return "—"
+        request = getattr(self, "_change_request", None)
+        qs = queryset.select_related("project", "code_type").order_by("code")
+        total = qs.count()
+        if total == 0:
+            return "No codes yet"
+        if request is not None and not request.user.has_perm("ourlives.view_invitationcode"):
+            return f"{plural(total, 'code')}"
+        page = paginate_related(self, qs, page_key)
+        rows = related_rows(
+            format_html(
+                '<a href="{}">{}</a> — {} — {} — {}/{}',
+                reverse("admin:ourlives_invitationcode_change", args=[c.pk]),
+                c.code,
+                c.project.name,
+                c.code_type.name if c.code_type is not None else "—",
+                c.current_use, c.max_use,
+            )
+            for c in page.object_list
+        )
+        view_all = (
+            reverse("admin:ourlives_invitationcode_changelist") + view_all_query
+        )
+        return related_list(rows, related_footer(self, obj, page, page_key, view_all, f"View all {plural(total, 'code')}"))
+
+    @admin.display(description="Codes across orders")
+    def codes_across_orders_list(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        return self._org_codes_list(
+            obj,
+            InvitationCode.objects.filter(order__organization=obj),
+            "org_order_codes_page",
+            f"?order__organization__id__exact={obj.pk}",
+        )
+
+    @admin.display(description="Codes (direct)")
+    def codes_direct_list(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        return self._org_codes_list(
+            obj,
+            InvitationCode.objects.filter(organization=obj),
+            "org_codes_page",
+            f"?organization__id__exact={obj.pk}",
+        )
 
 
 @admin.register(InvitationCode)
@@ -375,12 +426,12 @@ class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
             "fields": ("additional_information", "ip_address", "form_entry_key"),
         }),
         ("Related", {
-            "fields": ("rep_card", "contacts_list", "codes_list"),
+            "fields": ("organization_card", "rep_card", "contacts_list", "codes_list"),
         }),
     )
     readonly_fields = (
         "total_agreed_price_display", "is_pilot_order_display", "submitted_at",
-        "rep_card", "contacts_list", "codes_list",
+        "organization_card", "rep_card", "contacts_list", "codes_list",
     )
 
     def get_queryset(self, request):
@@ -400,6 +451,32 @@ class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
     @admin.display(description="Pilot", boolean=True)
     def is_pilot_order_display(self, obj):
         return obj.is_pilot_order
+
+    @admin.display(description="Company")
+    def organization_card(self, obj):
+        if obj is None or obj.pk is None or obj.organization_id is None:
+            return "—"
+        org = obj.organization
+        request = getattr(self, "_change_request", None)
+        if request is not None and not request.user.has_perm("ourlives.view_organization"):
+            return format_html("{} (details restricted)", str(org))
+        change_url = reverse("admin:ourlives_organization_change", args=[org.pk])
+        address = org.addresses.filter(is_primary=True).first() or org.addresses.order_by("pk").first()
+        counts = (
+            f"{org.contacts.count()} contacts · "
+            f"{org.orders.count()} orders · "
+            f"{InvitationCode.objects.filter(organization=org).count()} codes"
+        )
+        if address is None:
+            return format_html(
+                '<a href="{}">{}</a><br>{}<br><a href="{}">Open company →</a>',
+                change_url, str(org), counts, change_url,
+            )
+        return format_html(
+            '<a href="{}">{}</a><br>{}, {}<br>{}<br><a href="{}">Open company →</a>',
+            change_url, str(org), address.line1, address.city,
+            counts, change_url,
+        )
 
     @admin.display(description="Rep")
     def rep_card(self, obj):

@@ -2468,6 +2468,100 @@ class CrossLinkedChangeViewTests(TestCase):
         )
         self.assertContains(response, "Related")
 
+    def test_company_change_lists_codes_across_orders_and_direct(self):
+        orderless = InvitationCode.objects.create(
+            project=self.project, organization=self.org, max_use=4,
+        )
+        other_org = Organization.objects.create(name="Other")
+        other_order = Order.objects.create(
+            organization=other_org, rep=self.rep, po_number="PO-9",
+        )
+        other_code = InvitationCode.objects.create(
+            project=self.project, organization=other_org, max_use=3,
+            order=other_order, code_type=self.code_type,
+        )
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Codes across orders")
+        self.assertContains(response, "Codes (direct)")
+        self.assertContains(response, self.code.code)
+        self.assertContains(response, orderless.code)
+        self.assertNotContains(response, other_code.code)
+        self.assertContains(
+            response,
+            reverse("admin:ourlives_invitationcode_change", args=[self.code.pk]),
+        )
+        self.assertContains(response, f"order__organization__id__exact={self.org.pk}")
+        self.assertContains(response, f"organization__id__exact={self.org.pk}")
+
+    def test_company_codes_paginate_and_invalid_page(self):
+        for i in range(25):
+            InvitationCode.objects.create(
+                project=self.project, organization=self.org, max_use=2,
+                order=self.order,
+            )
+        response = self.client.get(
+            f"/admin/ourlives/organization/{self.org.pk}/change/",
+            {"org_order_codes_page": 2},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Page 2 of 2")
+        bogus = self.client.get(
+            f"/admin/ourlives/organization/{self.org.pk}/change/",
+            {"org_order_codes_page": "bogus"},
+        )
+        self.assertEqual(bogus.status_code, 200)
+        self.assertContains(bogus, "Page 1 of 2")
+
+    def test_order_change_shows_company_card(self):
+        response = self.client.get(f"/admin/ourlives/order/{self.order.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Open company")
+        self.assertContains(
+            response,
+            reverse("admin:ourlives_organization_change", args=[self.org.pk]),
+        )
+        self.assertContains(response, "2 contacts")
+        self.assertContains(response, "1 order")
+        self.assertContains(response, "1 code")
+
+    def test_company_card_address_fallback(self):
+        country = Country.objects.create(iso2="ZZ", iso3="ZZZ", name="Zedland")
+        OrganizationAddress.objects.create(
+            organization=self.org, country=country,
+            line1="Main 1", city="Springfield", zip="1",
+        )
+        response = self.client.get(f"/admin/ourlives/order/{self.order.pk}/change/")
+        self.assertContains(response, "Main 1, Springfield")
+        OrganizationAddress.objects.create(
+            organization=self.org, country=country,
+            line1="Prime 9", city="Shelbyville", zip="2", is_primary=True,
+        )
+        response = self.client.get(f"/admin/ourlives/order/{self.order.pk}/change/")
+        self.assertContains(response, "Prime 9, Shelbyville")
+
+    def test_restricted_user_sees_code_counts_and_restricted_card(self):
+        user = User.objects.create_user("codes_restricted", "c@test.com", "x", is_staff=True)
+        for codename in ("view_organization", "change_organization"):
+            user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(user)
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1 code")
+        self.assertNotContains(
+            response, reverse("admin:ourlives_invitationcode_change", args=[self.code.pk]),
+        )
+        user2 = User.objects.create_user("card_restricted", "d@test.com", "x", is_staff=True)
+        for codename in ("view_order", "change_order"):
+            user2.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(user2)
+        response = self.client.get(f"/admin/ourlives/order/{self.order.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "(details restricted)")
+        self.assertNotContains(
+            response, reverse("admin:ourlives_organization_change", args=[self.org.pk]),
+        )
+
     def test_restricted_user_sees_counts_not_links(self):
         from django.contrib import admin as admin_site
 
