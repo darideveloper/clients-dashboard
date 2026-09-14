@@ -16,7 +16,7 @@ from unfold.contrib.filters.admin import (
     RelatedDropdownFilter,
 )
 
-from project.admin_base import ModelAdminUnfoldBase, OurlivesExportMixin, OurlivesModelAdminBase
+from project.admin_base import ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase
 from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent
 
 
@@ -45,13 +45,18 @@ class OrganizationAddressInline(UnfoldStackedInline):
 
 
 @admin.register(Organization)
-class OrganizationAdmin(OurlivesModelAdminBase):
+class OrganizationAdmin(OrderSummaryAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "business"
-    list_display = ("name", "description")
+    list_display = ("name", "description") + OrderSummaryAdminMixin.order_summary_displays
     list_display_links = ("name",)
     list_filter = ("assigned_rep",)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
     inlines = (ContactInline, OrganizationAddressInline)
+    fieldsets = (
+        (None, {"fields": ("name", "description", "assigned_rep")}),
+        ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
+    )
+    readonly_fields = OrderSummaryAdminMixin.order_summary_displays
 
 
 @admin.register(InvitationCode)
@@ -96,11 +101,16 @@ class CountryAdmin(OurlivesModelAdminBase):
 
 
 @admin.register(Rep)
-class RepAdmin(OurlivesModelAdminBase):
+class RepAdmin(OrderSummaryAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "badge"
-    list_display = ("first_name", "last_name", "email")
+    list_display = ("first_name", "last_name", "email") + OrderSummaryAdminMixin.order_summary_displays
     list_display_links = ("first_name",)
     search_fields = ("first_name", "last_name", "email")
+    fieldsets = (
+        (None, {"fields": ("first_name", "last_name", "email")}),
+        ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
+    )
+    readonly_fields = OrderSummaryAdminMixin.order_summary_displays
 
 
 @admin.register(ContactType)

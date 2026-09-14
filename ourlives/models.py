@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Max
 from solo.models import SingletonModel
 
 
@@ -13,6 +14,86 @@ def generate_invitation_code():
 
 def generate_order_number():
     return "OL-" + uuid.uuid4().hex[:6].upper()
+
+
+UNCATEGORIZED_CURRENCY = "Uncategorized"
+
+ORDER_SUMMARY_HELP_TEXTS = {
+    "order_count": "Number of orders linked to this record (Order.organization / Order.rep).",
+    "agreed_scans_total": "Sum of number_of_scans × cost_per_scan over its orders (form: scan count × price per scan). Null values count as 0. Per currency; pilots included.",
+    "catalog_items_total": "Sum of quantity × unit_price over its order items (form: product picker × quantity, price frozen at order time). Per currency; pilots included.",
+    "combined_total": "Agreed scans total + catalog items total, per currency. Amounts in different currencies are never added together.",
+    "last_order_date": "Most recent Order.submitted_at.",
+}
+
+
+def _breakdown_add(totals, code, amount):
+    if amount:
+        totals[code or UNCATEGORIZED_CURRENCY] = totals.get(code or UNCATEGORIZED_CURRENCY, Decimal("0")) + amount
+
+
+def format_currency_breakdown(totals):
+    if not totals:
+        return "—"
+    return " · ".join(f"{code} {amount:,.2f}" for code, amount in sorted(totals.items()))
+
+
+def _order_currency_code(order):
+    if order.currency_id:
+        return order.currency.code
+    if order.pilot_currency_id:
+        return order.pilot_currency.code
+    return None
+
+
+class OrderSummaryMixin:
+    """Per-currency order summaries shared by Organization and Rep (both expose `orders`)."""
+
+    @property
+    def order_count(self):
+        if self.pk is None:
+            return 0
+        return self.orders.count()
+
+    @property
+    def agreed_scans_total(self):
+        if self.pk is None:
+            return {}
+        totals = {}
+        for order in self.orders.select_related("currency", "pilot_currency").all():
+            amount = (order.number_of_scans or 0) * (order.cost_per_scan or Decimal("0"))
+            _breakdown_add(totals, _order_currency_code(order), amount)
+        return totals
+
+    @property
+    def catalog_items_total(self):
+        if self.pk is None:
+            return {}
+        totals = {}
+        items = (
+            OrderItem.objects.filter(order__in=self.orders.values("pk"))
+            .select_related("order__currency", "order__pilot_currency", "product__currency")
+            .all()
+        )
+        for item in items:
+            code = _order_currency_code(item.order)
+            if code is None and item.product_id and item.product.currency_id:
+                code = item.product.currency.code
+            _breakdown_add(totals, code, item.quantity * item.unit_price)
+        return totals
+
+    @property
+    def combined_total(self):
+        totals = dict(self.agreed_scans_total)
+        for code, amount in self.catalog_items_total.items():
+            totals[code] = totals.get(code, Decimal("0")) + amount
+        return {code: amount for code, amount in totals.items() if amount}
+
+    @property
+    def last_order_date(self):
+        if self.pk is None:
+            return None
+        return self.orders.aggregate(latest=Max("submitted_at"))["latest"]
 
 
 class Project(models.Model):
@@ -31,7 +112,7 @@ class Project(models.Model):
         return self.name
 
 
-class Organization(models.Model):
+class Organization(OrderSummaryMixin, models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
     assigned_rep = models.ForeignKey(
@@ -346,7 +427,7 @@ class Country(models.Model):
         return self.name
 
 
-class Rep(models.Model):
+class Rep(OrderSummaryMixin, models.Model):
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     email = models.EmailField(max_length=254, unique=True)
@@ -612,3 +693,49 @@ class OrderItem(models.Model):
     @property
     def line_total(self):
         return self.quantity * self.unit_price
+
+
+def attach_money_breakdowns(holders):
+    """Bulk per-currency money breakdowns for a changelist page (constant queries).
+
+    Attaches `_agreed_scans_total`, `_catalog_items_total`, `_combined_total`
+    mappings to each holder (Organization or Rep) so admin list columns avoid
+    per-row queries. Display methods fall back to the model properties.
+    """
+    holders = list(holders)
+    if not holders:
+        return
+    for rel, group in (
+        ("organization", [h for h in holders if isinstance(h, Organization)]),
+        ("rep", [h for h in holders if not isinstance(h, Organization)]),
+    ):
+        _attach_money_breakdowns_for_rel(rel, group)
+
+
+def _attach_money_breakdowns_for_rel(rel, holders):
+    agreed = {h.pk: {} for h in holders}
+    items = {h.pk: {} for h in holders}
+    for holder_id, scans, cost, curr, pilot in (
+        Order.objects.filter(**{f"{rel}__in": holders}).values_list(
+            rel, "number_of_scans", "cost_per_scan", "currency__code", "pilot_currency__code"
+        )
+    ):
+        _breakdown_add(agreed[holder_id], curr or pilot, (scans or 0) * (cost or Decimal("0")))
+    for holder_id, qty, price, o_curr, o_pilot, p_curr in (
+        OrderItem.objects.filter(**{f"order__{rel}__in": holders}).values_list(
+            f"order__{rel}",
+            "quantity",
+            "unit_price",
+            "order__currency__code",
+            "order__pilot_currency__code",
+            "product__currency__code",
+        )
+    ):
+        _breakdown_add(items[holder_id], o_curr or o_pilot or p_curr, qty * price)
+    for h in holders:
+        h._agreed_scans_total = agreed[h.pk]
+        h._catalog_items_total = items[h.pk]
+        combined = dict(agreed[h.pk])
+        for code, amount in items[h.pk].items():
+            combined[code] = combined.get(code, Decimal("0")) + amount
+        h._combined_total = {code: amount for code, amount in combined.items() if amount}

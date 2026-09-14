@@ -2,7 +2,8 @@ from datetime import datetime
 from io import BytesIO
 from urllib.parse import quote
 
-from django.contrib import messages
+from django.contrib import admin, messages
+from django.db.models import Count, Max
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
@@ -94,3 +95,87 @@ class OurlivesModelAdminBase(OurlivesExportMixin, ModelAdminUnfoldBase):
     actions_list = ["export_all"]
     # Also expose on detail view for singletons (AppSettings)
     actions_detail = ["export_all"]
+
+
+class OrderSummaryAdminMixin:
+    """Per-currency order summaries for Organization/Rep admins.
+
+    - `get_queryset` annotates sortable `_order_count` / `_last_order_date`.
+    - `changelist_view` bulk-attaches money breakdowns (constant queries).
+    - Display methods prefer precomputed data, fall back to model properties
+      (detail view, unsaved instances).
+    - `get_form` injects per-field help texts so they render under readonly
+      summary fields (Django only shows help for readonly via form Meta).
+    """
+
+    order_summary_displays = (
+        "order_count_display",
+        "agreed_scans_total_display",
+        "catalog_items_total_display",
+        "combined_total_display",
+        "last_order_date_display",
+    )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .annotate(_order_count=Count("orders", distinct=True), _last_order_date=Max("orders__submitted_at"))
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        response = super().changelist_view(request, extra_context)
+        try:
+            result_list = list(response.context_data["cl"].result_list)
+        except (AttributeError, KeyError, TypeError):
+            return response
+        from ourlives.models import attach_money_breakdowns
+
+        attach_money_breakdowns(result_list)
+        return response
+
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        form = super().get_form(request, obj, change=change, **kwargs)
+        from ourlives.models import ORDER_SUMMARY_HELP_TEXTS
+
+        form._meta.help_texts = {
+            **(getattr(form._meta, "help_texts", None) or {}),
+            **{f"{name}_display": text for name, text in ORDER_SUMMARY_HELP_TEXTS.items()},
+        }
+        return form
+
+    @admin.display(description="Orders", ordering="_order_count")
+    def order_count_display(self, obj):
+        if obj is None:
+            return 0
+        value = getattr(obj, "_order_count", None)
+        return obj.order_count if value is None else value
+
+    def _breakdown_display(self, obj, annotated_name, prop_name):
+        from ourlives.models import format_currency_breakdown
+
+        if obj is None:
+            return format_currency_breakdown({})
+        breakdown = getattr(obj, annotated_name, None)
+        if breakdown is None:
+            breakdown = getattr(obj, prop_name)
+        return format_currency_breakdown(breakdown)
+
+    @admin.display(description="Agreed scans total")
+    def agreed_scans_total_display(self, obj):
+        return self._breakdown_display(obj, "_agreed_scans_total", "agreed_scans_total")
+
+    @admin.display(description="Catalog items total")
+    def catalog_items_total_display(self, obj):
+        return self._breakdown_display(obj, "_catalog_items_total", "catalog_items_total")
+
+    @admin.display(description="Combined total")
+    def combined_total_display(self, obj):
+        return self._breakdown_display(obj, "_combined_total", "combined_total")
+
+    @admin.display(description="Last order", ordering="_last_order_date")
+    def last_order_date_display(self, obj):
+        if obj is None:
+            return None
+        value = getattr(obj, "_last_order_date", None)
+        return obj.last_order_date if value is None else value

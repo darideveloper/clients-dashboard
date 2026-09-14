@@ -26,7 +26,10 @@ from ourlives.models import (
     Project,
     Rep,
     StripeEvent,
+    UNCATEGORIZED_CURRENCY,
+    attach_money_breakdowns,
     calculate_token_count,
+    format_currency_breakdown,
 )
 
 
@@ -2136,3 +2139,220 @@ class SidebarPermissionTests(TestCase):
         self.client.force_login(user)
         response = self.client.post("/admin/ourlives/order/", {"action": "export_selected", "_selected_action": []})
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class OrderSummaryModelTests(TestCase):
+    def setUp(self):
+        self.usd = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
+        self.eur = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("0.92"))
+        self.gbp = Currency.objects.create(code="GBP", name="British Pound", exchange_rate=Decimal("0.75"))
+        self.org = Organization.objects.create(name="Acme")
+        self.rep = Rep.objects.create(first_name="Ann", last_name="A", email="a@test.com")
+        self.pilot = OrderType.objects.create(code="pilot", name="Pilot Order")
+        self.prod_usd = Product.objects.create(currency=self.usd, name="Widget", unit_price=Decimal("10.00"))
+        self.prod_eur = Product.objects.create(currency=self.eur, name="Gadget", unit_price=Decimal("20.00"))
+        self._n = 0
+
+    def _order(self, org=None, rep=None, **kwargs):
+        self._n += 1
+        defaults = {"organization": org or self.org, "rep": rep or self.rep, "po_number": f"PO-{self._n}"}
+        defaults.update(kwargs)
+        return Order.objects.create(**defaults)
+
+    def test_empty_records(self):
+        for holder in (self.org, self.rep):
+            with self.subTest(holder=holder):
+                self.assertEqual(holder.order_count, 0)
+                self.assertEqual(holder.agreed_scans_total, {})
+                self.assertEqual(holder.catalog_items_total, {})
+                self.assertEqual(holder.combined_total, {})
+                self.assertIsNone(holder.last_order_date)
+
+    def test_unsaved_instance(self):
+        holder = Organization(name="Ghost")
+        self.assertEqual(holder.order_count, 0)
+        self.assertEqual(holder.agreed_scans_total, {})
+        self.assertIsNone(holder.last_order_date)
+
+    def test_agreed_nulls_as_zero_and_pilots_included(self):
+        pilot_order = self._order(currency=self.usd, number_of_scans=500, cost_per_scan=Decimal("2.50"))
+        pilot_order.order_types.add(self.pilot)
+        self._order(currency=self.usd)  # null scans and cost
+        self._order(currency=self.usd, number_of_scans=100)  # null cost
+        self.assertEqual(self.org.agreed_scans_total, {"USD": Decimal("1250.00")})
+        self.assertEqual(self.org.order_count, 3)
+
+    def test_multi_currency_separation(self):
+        self._order(currency=self.usd, number_of_scans=500, cost_per_scan=Decimal("3.50"))
+        self._order(currency=self.eur, number_of_scans=100, cost_per_scan=Decimal("8.00"))
+        self.assertEqual(
+            self.org.agreed_scans_total, {"EUR": Decimal("800.00"), "USD": Decimal("1750.00")}
+        )
+
+    def test_agreed_currency_attribution(self):
+        both = self._order(currency=self.usd, pilot_currency=self.gbp, number_of_scans=1, cost_per_scan=Decimal("10.00"))
+        pilot_only = self._order(pilot_currency=self.gbp, number_of_scans=1, cost_per_scan=Decimal("20.00"))
+        orphan = self._order(number_of_scans=1, cost_per_scan=Decimal("30.00"))
+        totals = self.org.agreed_scans_total
+        self.assertEqual(totals["USD"], Decimal("10.00"))
+        self.assertEqual(totals["GBP"], Decimal("20.00"))
+        self.assertEqual(totals[UNCATEGORIZED_CURRENCY], Decimal("30.00"))
+
+    def test_items_attribution_order_first_then_product(self):
+        order_usd = self._order(currency=self.usd)
+        OrderItem.objects.create(order=order_usd, product=self.prod_eur, quantity=2, unit_price=Decimal("20.00"))
+        self.assertEqual(self.org.catalog_items_total, {"USD": Decimal("40.00")})
+        order_nocurrency = self._order()
+        OrderItem.objects.create(order=order_nocurrency, product=self.prod_eur, quantity=1, unit_price=Decimal("20.00"))
+        self.assertEqual(
+            self.org.catalog_items_total, {"USD": Decimal("40.00"), "EUR": Decimal("20.00")}
+        )
+
+    def test_items_attribution_pilot_currency_middle(self):
+        order = self._order(pilot_currency=self.gbp)
+        OrderItem.objects.create(order=order, product=self.prod_eur, quantity=1, unit_price=Decimal("20.00"))
+        self.assertEqual(self.org.catalog_items_total, {"GBP": Decimal("20.00")})
+
+    def test_combined_total_per_currency(self):
+        order = self._order(currency=self.usd, number_of_scans=500, cost_per_scan=Decimal("2.50"))
+        OrderItem.objects.create(order=order, product=self.prod_usd, quantity=2, unit_price=Decimal("995.00"))
+        other = self._order(currency=self.eur)
+        OrderItem.objects.create(order=other, product=self.prod_eur, quantity=1, unit_price=Decimal("100.00"))
+        self.assertEqual(
+            self.org.combined_total, {"USD": Decimal("3240.00"), "EUR": Decimal("100.00")}
+        )
+
+    def test_last_order_date(self):
+        first = self._order()
+        second = self._order()
+        self.assertEqual(self.org.last_order_date, max(first.submitted_at, second.submitted_at))
+        self.assertEqual(self.rep.last_order_date, max(first.submitted_at, second.submitted_at))
+
+    def test_rep_scope_is_direct_fk(self):
+        other_rep = Rep.objects.create(first_name="Bob", last_name="B", email="b@test.com")
+        self.org.assigned_rep = self.rep
+        self.org.save()
+        self._order(rep=other_rep, currency=self.usd, number_of_scans=10, cost_per_scan=Decimal("1.00"))
+        self.assertEqual(self.rep.order_count, 0)
+        self.assertEqual(self.rep.agreed_scans_total, {})
+        self._order(rep=self.rep, currency=self.usd, number_of_scans=10, cost_per_scan=Decimal("1.00"))
+        self.assertEqual(self.rep.order_count, 1)
+        self.assertEqual(self.rep.agreed_scans_total, {"USD": Decimal("10.00")})
+
+    def test_format_breakdown(self):
+        self.assertEqual(format_currency_breakdown({}), "—")
+        self.assertEqual(
+            format_currency_breakdown({"USD": Decimal("1750"), "EUR": Decimal("800")}),
+            "EUR 800.00 · USD 1,750.00",
+        )
+
+    def test_attach_money_breakdowns_matches_properties(self):
+        order = self._order(currency=self.usd, number_of_scans=500, cost_per_scan=Decimal("2.50"))
+        OrderItem.objects.create(order=order, product=self.prod_usd, quantity=1, unit_price=Decimal("10.00"))
+        attach_money_breakdowns([self.org, self.rep])
+        self.assertEqual(self.org._agreed_scans_total, self.org.agreed_scans_total)
+        self.assertEqual(self.org._catalog_items_total, self.org.catalog_items_total)
+        self.assertEqual(self.org._combined_total, self.org.combined_total)
+        self.assertEqual(self.rep._agreed_scans_total, {"USD": Decimal("1250.00")})
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class OrderSummaryAdminTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("summary_admin", "s@test.com", "x")
+        self.client = Client()
+        self.client.force_login(self.admin)
+        self.usd = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
+        self.eur = Currency.objects.create(code="EUR", name="Euro", exchange_rate=Decimal("0.92"))
+        self.full = Organization.objects.create(name="Full Org")
+        self.empty = Organization.objects.create(name="Empty Org")
+        self.rep = Rep.objects.create(first_name="Ann", last_name="A", email="a@test.com")
+        order = Order.objects.create(
+            organization=self.full, rep=self.rep, po_number="PO-1",
+            currency=self.usd, number_of_scans=500, cost_per_scan=Decimal("2.50"),
+        )
+        product = Product.objects.create(currency=self.usd, name="Widget", unit_price=Decimal("10.00"))
+        OrderItem.objects.create(order=order, product=product, quantity=2, unit_price=Decimal("10.00"))
+        Order.objects.create(organization=self.full, rep=self.rep, po_number="PO-2", currency=self.eur)
+
+    def _changelist(self, model):
+        response = self.client.get(f"/admin/ourlives/{model}/")
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def test_changelists_render_breakdowns(self):
+        for model in ("organization", "rep"):
+            with self.subTest(model=model):
+                content = self._changelist(model).content.decode()
+                for text in ("Agreed scans total", "Catalog items total", "Combined total", "USD 1,250.00"):
+                    self.assertIn(text, content)
+
+    def test_changelist_annotations_match_properties(self):
+        for model in ("organization", "rep"):
+            with self.subTest(model=model):
+                for obj in self._changelist(model).context["cl"].result_list:
+                    self.assertEqual(obj._order_count, obj.order_count)
+                    self.assertEqual(obj._last_order_date, obj.last_order_date)
+                    self.assertEqual(obj._agreed_scans_total, obj.agreed_scans_total)
+                    self.assertEqual(obj._combined_total, obj.combined_total)
+
+    def _ordering_idx(self, model, column):
+        # `o` indexes cl.list_display, which prepends the action checkbox
+        cl = self.client.get(f"/admin/ourlives/{model}/").context["cl"]
+        return list(cl.list_display).index(column)
+
+    def test_sorting_by_count_and_date(self):
+        for model in ("organization", "rep"):
+            for column in ("order_count_display", "last_order_date_display"):
+                idx = self._ordering_idx(model, column)
+                with self.subTest(model=model, column=column):
+                    for prefix in ("", "-"):
+                        response = self.client.get(f"/admin/ourlives/{model}/", {"o": f"{prefix}{idx}"})
+                        self.assertEqual(response.status_code, 200)
+        # self.full has the most orders of any org (a backfill org also exists)
+        idx = self._ordering_idx("organization", "order_count_display")
+        response = self.client.get("/admin/ourlives/organization/", {"o": f"-{idx}"})
+        pks = [o.pk for o in response.context["cl"].result_list]
+        self.assertEqual(pks[0], self.full.pk)
+        self.assertEqual(set(pks), set(Organization.objects.values_list("pk", flat=True)))
+
+    def test_no_per_row_queries(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as before:
+            self.client.get("/admin/ourlives/organization/")
+        for i in range(3):
+            org = Organization.objects.create(name=f"Extra {i}")
+            Order.objects.create(organization=org, rep=self.rep, po_number=f"PO-X{i}", currency=self.usd)
+        with CaptureQueriesContext(connection) as after:
+            self.client.get("/admin/ourlives/organization/")
+        self.assertEqual(len(before), len(after))
+
+    def test_change_forms_show_summary_section(self):
+        for url in (f"/admin/ourlives/organization/{self.full.pk}/change/",
+                    f"/admin/ourlives/rep/{self.rep.pk}/change/"):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                content = response.content.decode()
+                for text in ("Order summary", "price frozen at order time",
+                             "never added together", "USD 1,250.00"):
+                    self.assertIn(text, content)
+
+    def test_empty_change_form_placeholders(self):
+        content = self.client.get(f"/admin/ourlives/organization/{self.empty.pk}/change/").content.decode()
+        self.assertIn("Order summary", content)
+        self.assertIn("—", content)
+
+    def test_add_forms_render(self):
+        for url in ("/admin/ourlives/organization/add/", "/admin/ourlives/rep/add/"):
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 200)
