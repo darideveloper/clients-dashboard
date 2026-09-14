@@ -15,8 +15,8 @@ fi
 portless proxy start
 portless trust
 
-# 4. Dynamic Port Detection (starts at 8000)
-PORT=8000
+# 4. Dynamic Port Detection (prefers portless-injected $PORT, else starts at 8000)
+PORT=${PORT:-8000}
 while ss -tuln | grep -q ":$PORT " ; do
     PORT=$((PORT+1))
 done

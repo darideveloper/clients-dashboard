@@ -15,6 +15,7 @@ staticfiles/
 info.txt
 /media
 .env*
+!.env.example
 .vscode
 */.DS_Store
 .DS_Store
@@ -32,6 +33,9 @@ openspec/changes/*
 # skip docs
 docs/
 !ourlives/docs/
+!/docs/
+/docs/*
+!/docs/django-worktrees.md
 
 # ignore by default all hiden folders (like agents folders)
 .*/
@@ -42,3 +46,6 @@ CLIENT.md
 
 # data files
 *.csv
+
+# fuse/overlay leftover handles
+.fuse_hidden*
