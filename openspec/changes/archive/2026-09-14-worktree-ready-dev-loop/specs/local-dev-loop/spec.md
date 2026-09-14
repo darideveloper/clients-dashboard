@@ -1,8 +1,5 @@
-# local-dev-loop Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change init-django-clients-project. Update Purpose after archive.
-## Requirements
 ### Requirement: Portless subdomain dev script
 The repo SHALL contain a `dev.sh` script that boots a `tmux` session named `${PROJECT_NAME}_dev` (where `PROJECT_NAME` is `basename "$PWD"`) running `portless clients --app-port $PORT -- python manage.py runserver $PORT`. The script SHALL call `portless proxy start` and `portless trust` before launching the session. Port selection SHALL prefer the portless-injected `$PORT` when set (failing fast if it is taken) and SHALL otherwise auto-increment `$PORT` starting at 8000 while `ss -tuln` shows the port is in use.
 
@@ -18,19 +15,7 @@ The repo SHALL contain a `dev.sh` script that boots a `tmux` session named `${PR
 - **WHEN** `$PORT` is injected by portless and free
 - **THEN** `./dev.sh` binds exactly that port instead of scanning
 
-### Requirement: Re-attach on subsequent runs
-If a tmux session with the same name already exists, `dev.sh` SHALL attach to it instead of creating a new one.
-
-#### Scenario: Re-attach
-- **WHEN** `./dev.sh` runs a second time while the first session is detached
-- **THEN** the existing `clients_dev` tmux session is attached to
-
-### Requirement: Virtualenv auto-detection
-`dev.sh` SHALL activate `venv/bin/activate` if the `venv` directory exists, or `.venv/bin/activate` if `.venv` exists, before launching any service.
-
-#### Scenario: Venv activation
-- **WHEN** `./dev.sh` runs from a checkout that has `venv/`
-- **THEN** the Python interpreter used by the runserver command is the venv's interpreter
+## ADDED Requirements
 
 ### Requirement: Concurrent sibling domains
 Each sibling checkout SHALL serve its own basename-derived portless domain (e.g. `../clients-feature-x` → `https://clients-feature-x.localhost`) with a unique tmux session (`${PROJECT_NAME}_dev`), so any number of siblings run concurrently.
@@ -38,4 +23,3 @@ Each sibling checkout SHALL serve its own basename-derived portless domain (e.g.
 #### Scenario: Two siblings side by side
 - **WHEN** `./dev.sh` runs in both `clients` and `clients-feature-x`
 - **THEN** two tmux sessions (`clients_dev`, `clients-feature-x_dev`) exist and `portless list` shows both domains on different ports
-

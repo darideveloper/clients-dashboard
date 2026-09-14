@@ -47,11 +47,15 @@ The `.env` file SHALL contain ONLY the `ENV` variable and no other keys. All oth
 - **THEN** Django connects to Postgres on `migrate` and `runserver`
 
 ### Requirement: CORS and CSRF origins
-`CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` SHALL be derived from comma-split env vars, with each value stripped and trailing slashes removed. The dev `.env.dev` SHALL include `https://clients.localhost` and `http://localhost:8000`; prod SHALL include the production hostname.
+`CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` SHALL be derived from comma-split env vars, with each value stripped and trailing slashes removed. The dev `.env.dev` SHALL include `https://clients.localhost` and `http://localhost:8000`; prod SHALL include the production hostname. In dev, `.localhost` subdomain requests from the checkout's own portless domain SHALL also be accepted so copied env files work in any sibling.
 
 #### Scenario: Localhost trusted
 - **WHEN** `.env.dev` has `CORS_ALLOWED_ORIGINS=https://clients.localhost,http://localhost:8000`
 - **THEN** `settings.CORS_ALLOWED_ORIGINS == ["https://clients.localhost", "http://localhost:8000"]`
+
+#### Scenario: Sibling domain accepted
+- **WHEN** a sibling serves `https://clients-feature-x.localhost` with a copied `.env.dev`
+- **THEN** requests from that origin pass host, CORS, and CSRF checks
 
 ### Requirement: Localized time and date formats
 `TIME_ZONE` SHALL be `America/Mexico_City`. `LANGUAGE_CODE` SHALL be `en-us`. `USE_I18N` SHALL be `True`. `USE_TZ` SHALL be `True`. `DATE_FORMAT` SHALL be `d/b/Y`, `TIME_FORMAT` SHALL be `H:i`, and `DATETIME_FORMAT` SHALL be `"d/b/Y H:i"`.
@@ -80,4 +84,11 @@ The `.env.prod` `ALLOWED_HOSTS` SHALL NOT contain `localhost` or `127.0.0.1`. It
 #### Scenario: Prod hosts are not loopback
 - **WHEN** `.env.prod` is loaded
 - **THEN** `"localhost"` and `"127.0.0.1"` are not in `settings.ALLOWED_HOSTS`
+
+### Requirement: Portless URL resolution chain
+Settings SHALL resolve the public dev URL as `PORTLESS_URL` (injected by portless) first, then `HOST` from env, then the production fallback, so a copied `.env.dev` yields the correct per-checkout domain without edits.
+
+#### Scenario: Injected URL wins
+- **WHEN** `PORTLESS_URL=https://clients-feature-x.localhost` is present
+- **THEN** the app generates absolute URLs (e.g. redirects, callbacks) against that domain regardless of the copied `HOST` value
 
