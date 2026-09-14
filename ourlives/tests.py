@@ -2136,3 +2136,145 @@ class SidebarPermissionTests(TestCase):
         self.client.force_login(user)
         response = self.client.post("/admin/ourlives/order/", {"action": "export_selected", "_selected_action": []})
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class CrossLinkedChangeViewTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("xlink_admin", "x@test.com", "x")
+        self.client = Client()
+        self.client.force_login(self.admin)
+        self.org = Organization.objects.create(name="Acme", description="d")
+        self.rep = Rep.objects.create(
+            first_name="Rita", last_name="Rep", email="rita@test.com",
+        )
+        self.org.assigned_rep = self.rep
+        self.org.save()
+        self.ct = ContactType.objects.create(code="billing", name="Billing")
+        self.primary = Contact.objects.create(
+            organization=self.org, contact_type=self.ct,
+            first_name="Pam", last_name="Primary", email="pam@test.com", phone="111",
+        )
+        self.invoice = Contact.objects.create(
+            organization=self.org, contact_type=self.ct,
+            first_name="Ivan", last_name="Invoice", email="ivan@test.com", phone="222",
+        )
+        self.order = Order.objects.create(
+            organization=self.org, rep=self.rep, po_number="PO-1",
+            primary_contact=self.primary, invoice_contact=self.invoice,
+        )
+        self.project = Project.objects.create(name="Proj")
+        AppSettings.get_solo()
+        AppSettings.objects.update(total_tokens=10000)
+        self.code_type = CodeType.objects.create(code="up_to_5", name="Up to 5", max_codes=5)
+        self.code = InvitationCode.objects.create(
+            project=self.project, organization=self.org, max_use=10,
+            order=self.order, code_type=self.code_type,
+        )
+
+    def test_company_change_lists_orders(self):
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.order.order_number)
+        self.assertContains(
+            response, reverse("admin:ourlives_order_change", args=[self.order.pk]),
+        )
+        self.assertContains(response, "View all 1 order")
+
+    def test_company_add_view_renders(self):
+        self.assertEqual(self.client.get("/admin/ourlives/organization/add/").status_code, 200)
+
+    def test_company_orders_pagination_and_invalid_page(self):
+        for i in range(25):
+            Order.objects.create(
+                organization=self.org, rep=self.rep, po_number=f"PO-P{i}",
+            )
+        response = self.client.get(
+            f"/admin/ourlives/organization/{self.org.pk}/change/",
+            {"org_orders_page": 2},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Page 2 of 2")
+        bogus = self.client.get(
+            f"/admin/ourlives/organization/{self.org.pk}/change/",
+            {"org_orders_page": "bogus"},
+        )
+        self.assertEqual(bogus.status_code, 200)
+        self.assertContains(bogus, "Page 1 of 2")
+
+    def test_rep_lists_paginate_independently(self):
+        for i in range(25):
+            Organization.objects.create(name=f"Co {i:02d}", assigned_rep=self.rep)
+        response = self.client.get(
+            f"/admin/ourlives/rep/{self.rep.pk}/change/",
+            {"rep_companies_page": 2},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Page 2 of 2")
+        self.assertContains(response, self.order.order_number)
+        self.assertContains(response, "View all 1 order")
+
+    def test_rep_change_lists_companies_and_orders(self):
+        response = self.client.get(f"/admin/ourlives/rep/{self.rep.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Acme")
+        self.assertContains(
+            response,
+            reverse("admin:ourlives_organization_change", args=[self.org.pk]),
+        )
+        self.assertContains(response, self.order.order_number)
+        self.assertContains(
+            response, reverse("admin:ourlives_order_change", args=[self.order.pk]),
+        )
+
+    def test_order_change_shows_rep_card_contacts_and_codes(self):
+        response = self.client.get(f"/admin/ourlives/order/{self.order.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "mailto:rita@test.com")
+        self.assertContains(response, "Open rep")
+        self.assertContains(response, "(primary)")
+        self.assertContains(response, "(invoice)")
+        self.assertContains(
+            response,
+            reverse("admin:ourlives_contact_change", args=[self.primary.pk]),
+        )
+        self.assertContains(response, self.code.code)
+        self.assertContains(
+            response,
+            reverse("admin:ourlives_invitationcode_change", args=[self.code.pk]),
+        )
+        self.assertContains(response, "Related")
+
+    def test_restricted_user_sees_counts_not_links(self):
+        from django.contrib import admin as admin_site
+
+        user = User.objects.create_user("restricted", "r@test.com", "x", is_staff=True)
+        for codename in ("view_organization", "change_organization"):
+            user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(user)
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "1 order")
+        self.assertNotContains(
+            response, reverse("admin:ourlives_order_change", args=[self.order.pk]),
+        )
+        ma = admin_site.site._registry[Organization]
+        self.assertEqual(ma.orders_list(Organization(name="unsaved")), "—")
+
+    def test_empty_states(self):
+        bare_org = Organization.objects.create(name="Bare")
+        response = self.client.get(f"/admin/ourlives/organization/{bare_org.pk}/change/")
+        self.assertContains(response, "No orders yet")
+        bare_rep = Rep.objects.create(first_name="Bo", last_name="Re", email="bo@test.com")
+        response = self.client.get(f"/admin/ourlives/rep/{bare_rep.pk}/change/")
+        self.assertContains(response, "No companies yet")
+        self.assertContains(response, "No orders yet")
+        bare_order = Order.objects.create(
+            organization=bare_org, rep=bare_rep, po_number="PO-BARE",
+        )
+        response = self.client.get(f"/admin/ourlives/order/{bare_order.pk}/change/")
+        self.assertContains(response, "No contacts yet")
+        self.assertContains(response, "No codes yet")
