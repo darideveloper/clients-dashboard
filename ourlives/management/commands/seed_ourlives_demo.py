@@ -40,10 +40,7 @@ from ourlives.models import (
     Project,
     Rep,
 )
-
-DEMO_PREFIX = "Demo "
-EMAIL_PREFIX = "test-"
-EMAIL_DOMAIN = "@gmail.com"
+from ourlives.demo_scope import DEMO_PREFIX, EMAIL_DOMAIN, EMAIL_PREFIX
 
 FIRST_NAMES = [
     "Ava", "Liam", "Maya", "Noah", "Zoe", "Ethan", "Ruby", "Lucas",
