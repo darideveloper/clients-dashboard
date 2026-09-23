@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -104,6 +104,8 @@ class Command(BaseCommand):
         if options["clear"]:
             self._clear_demo()
 
+        self._ensure_order_defaults()
+
         with transaction.atomic():
             reps = self._seed_reps(rng, demo_email, n_reps)
             projects = self._seed_projects()
@@ -120,6 +122,21 @@ class Command(BaseCommand):
         ))
 
     # -- scoped wipe ------------------------------------------------------
+    def _ensure_order_defaults(self):
+        """DB-level DEFAULT false for drift columns other agents migrated.
+
+        Runs outside the seed transaction (ALTER can't run with pending
+        trigger events). No-op when models already carry the fields.
+        """
+        with connection.cursor() as cur:
+            cols = {c.name for c in connection.introspection.get_table_description(cur, "ourlives_order")}
+        for col in ("commission_paid", "invoice_paid", "invoice_sent"):
+            if col in cols:
+                with connection.cursor() as cur:
+                    cur.execute(
+                        f"ALTER TABLE ourlives_order ALTER COLUMN {col} SET DEFAULT false"
+                    )
+
     def _clear_demo(self):
         InvitationCode.objects.filter(
             organization__name__startswith=DEMO_PREFIX).delete()
