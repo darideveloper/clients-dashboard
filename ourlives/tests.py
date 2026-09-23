@@ -1746,22 +1746,35 @@ class CrmAdminRegistrationTests(TestCase):
         self.assertEqual(OrderItemInline.extra, 0)
         self.assertEqual(OrgOrderInline.extra, 0)
         self.assertFalse(OrgOrderInline.can_delete)
-        self.assertTrue(OrgOrderInline.show_change_link)
+        self.assertFalse(OrgOrderInline.show_change_link)
         self.assertEqual(
             tuple(OrgOrderInline.fields),
-            ("order_number", "number_of_scans", "submitted_at"),
+            ("order_number", "number_of_scans", "submitted_at", "order_link"),
         )
         self.assertEqual(
             tuple(OrgOrderInline.readonly_fields),
-            ("order_number", "number_of_scans", "submitted_at"),
+            ("order_number", "number_of_scans", "submitted_at", "order_link"),
         )
 
         from django.contrib import admin as admin_site
 
         self.assertEqual(
             tuple(admin_site.site._registry[Organization].inlines),
-            (ContactInline, OrganizationAddressInline, OrgOrderInline),
+            (OrgOrderInline, ContactInline, OrganizationAddressInline),
         )
+
+    def test_order_link_display(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import OrgOrderInline
+
+        inline = OrgOrderInline(Order, admin_site.site)
+        self.assertEqual(inline.order_link(None), "")
+        self.assertEqual(inline.order_link(Order()), "")
+        link = inline.order_link(Order(pk=999))
+        self.assertIn("/admin/ourlives/order/999/change/", link)
+        self.assertIn("inlinechangelink", link)
+        self.assertIn(">Change<", link)
 
     def test_export_actions_inherited(self):
         from django.contrib import admin as admin_site
@@ -1819,7 +1832,7 @@ class CrmAdminRegistrationTests(TestCase):
             prefix for prefix in prefixes
             if f"{prefix}-0-is_primary" in response.content.decode()
         )
-        contact_prefix = next(p for p in prefixes if p != addr_prefix)
+        contact_prefix = next(p for p in prefixes if p not in (addr_prefix, "orders"))
         data = {
             "name": org.name,
             "description": "",
@@ -2051,6 +2064,10 @@ class ChildInlineCoexistenceTests(TestCase):
             for fs in response.context["inline_admin_formsets"]
         }
         self.assertEqual(set(formsets), {"contacts", "addresses", "orders"})
+        self.assertEqual(
+            [fs.formset.prefix for fs in response.context["inline_admin_formsets"]],
+            ["orders", "contacts", "addresses"],
+        )
         self.assertEqual(formsets["contacts"].formset.total_form_count(), 1)
         self.assertEqual(formsets["addresses"].formset.total_form_count(), 0)
         self.assertEqual(formsets["orders"].formset.total_form_count(), 0)
@@ -2448,6 +2465,19 @@ class CrossLinkedChangeViewTests(TestCase):
         )
         self.assertContains(response, "Total: 500 scans across 1 order")
         self.assertNotContains(response, "View all 1 order")
+        self.assertContains(response, "inlinechangelink")
+        self.assertContains(response, ">Change<")
+
+    def test_order_link_view_label_without_change_permission(self):
+        viewer = User.objects.create_user("order_viewer", "v@test.com", "x", is_staff=True)
+        for codename in ("view_organization", "change_organization", "view_order"):
+            viewer.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(viewer)
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "inlineviewlink")
+        self.assertContains(response, ">View<")
+        self.assertNotContains(response, "inlinechangelink")
 
     def test_company_add_view_renders(self):
         self.assertEqual(self.client.get("/admin/ourlives/organization/add/").status_code, 200)

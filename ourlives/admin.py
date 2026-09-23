@@ -48,14 +48,34 @@ class OrganizationAddressInline(UnfoldStackedInline):
 
 class OrgOrderInline(UnfoldTabularInline):
     model = Order
-    fields = ("order_number", "number_of_scans", "submitted_at")
-    readonly_fields = ("order_number", "number_of_scans", "submitted_at")
+    fields = ("order_number", "number_of_scans", "submitted_at", "order_link")
+    readonly_fields = ("order_number", "number_of_scans", "submitted_at", "order_link")
     extra = 0
     can_delete = False
-    show_change_link = True
+    show_change_link = False
 
     def has_add_permission(self, request, obj=None):
         return False
+
+    def get_formset(self, request, obj=None, **kwargs):
+        self._inline_request = request
+        return super().get_formset(request, obj, **kwargs)
+
+    @admin.display(description="")
+    def order_link(self, obj):
+        if obj is None or obj.pk is None:
+            return ""
+        request = getattr(self, "_inline_request", None)
+        if request is None or request.user.has_perm("ourlives.change_order"):
+            label, css = "Change", "inlinechangelink"
+        else:
+            label, css = "View", "inlineviewlink"
+        return format_html(
+            '<a href="{}" class="{}">{}</a>',
+            reverse("admin:ourlives_order_change", args=[obj.pk]),
+            css,
+            label,
+        )
 
 
 @admin.register(Organization)
@@ -66,7 +86,7 @@ class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, Ourlive
     list_select_related = ("assigned_rep",)
     list_filter = ("assigned_rep",)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
-    inlines = (ContactInline, OrganizationAddressInline, OrgOrderInline)
+    inlines = (OrgOrderInline, ContactInline, OrganizationAddressInline)
     fieldsets = (
         (None, {"fields": ("name", "description", "assigned_rep")}),
         ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
