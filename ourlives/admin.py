@@ -47,8 +47,9 @@ class OrganizationAddressInline(UnfoldStackedInline):
 @admin.register(Organization)
 class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "business"
-    list_display = ("name", "description") + OrderSummaryAdminMixin.order_summary_displays
+    list_display = ("name", "order_count_display", "rep_link", "last_order_date_display", "usage_pct_display", "combined_total_display")
     list_display_links = ("name",)
+    list_select_related = ("assigned_rep",)
     list_filter = ("assigned_rep",)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
     inlines = (ContactInline, OrganizationAddressInline)
@@ -60,6 +61,23 @@ class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, Ourlive
         ("Codes (direct)", {"fields": ("codes_direct_list",)}),
     )
     readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("orders_list", "codes_across_orders_list", "codes_direct_list")
+
+    @admin.display(description="Rep")
+    def rep_link(self, obj):
+        rep = getattr(obj, "assigned_rep", None) if obj is not None else None
+        if rep is None or rep.pk is None:
+            return "—"
+        return format_html(
+            '<a href="{}">{} {}</a>',
+            reverse("admin:ourlives_rep_change", args=[rep.pk]),
+            rep.first_name,
+            rep.last_name,
+        )
+
+    @admin.display(description="Usage %")
+    def usage_pct_display(self, obj):
+        # ponytail: dummy placeholder, real formula TBD
+        return "0%"
 
     @admin.display(description="Orders")
     def orders_list(self, obj):

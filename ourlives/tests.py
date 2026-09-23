@@ -2288,11 +2288,35 @@ class OrderSummaryAdminTests(TestCase):
         return response
 
     def test_changelists_render_breakdowns(self):
-        for model in ("organization", "rep"):
-            with self.subTest(model=model):
-                content = self._changelist(model).content.decode()
-                for text in ("Agreed scans total", "Catalog items total", "Combined total", "USD 1,250.00"):
-                    self.assertIn(text, content)
+        content = self._changelist("rep").content.decode()
+        for text in ("Agreed scans total", "Catalog items total", "Combined total", "USD 1,250.00"):
+            self.assertIn(text, content)
+
+    def test_organization_changelist_is_slim(self):
+        from django.contrib import admin
+        ma = admin.site._registry[Organization]
+        self.assertEqual(
+            tuple(ma.list_display),
+            ("name", "order_count_display", "rep_link", "last_order_date_display", "usage_pct_display", "combined_total_display"),
+        )
+        content = self._changelist("organization").content.decode()
+        for text in ("Orders", "Rep", "Last order", "Combined total", "Usage %", "0%"):
+            self.assertIn(text, content)
+        for text in ("Agreed scans total", "Catalog items total"):
+            self.assertNotIn(text, content)
+
+    def test_organization_rep_link_and_usage_dummy(self):
+        from django.contrib import admin
+        ma = admin.site._registry[Organization]
+        rep = Rep.objects.create(first_name="Bob", last_name="Jones", email="bob@test.com")
+        org = Organization.objects.create(name="Linked Org", assigned_rep=rep)
+        linked = ma.rep_link(org)
+        self.assertIn(f"/admin/ourlives/rep/{rep.pk}/change/", linked)
+        self.assertIn("Bob Jones", linked)
+        self.assertEqual(ma.rep_link(self.empty), "—")
+        self.assertEqual(ma.rep_link(None), "—")
+        self.assertEqual(ma.usage_pct_display(org), "0%")
+        self.assertEqual(ma.usage_pct_display(None), "0%")
 
     def test_changelist_annotations_match_properties(self):
         for model in ("organization", "rep"):
