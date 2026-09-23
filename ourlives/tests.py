@@ -1539,6 +1539,14 @@ class OrderTests(TestCase):
         self.assertTrue(order.commission_paid)
         self.assertEqual(order.commission_paid_on, date(2026, 9, 22))
 
+    def test_rep_commission_note_defaults_empty(self):
+        self.assertEqual(self._create_order().rep_commission_note, "")
+
+    def test_rep_commission_note_persists_verbatim(self):
+        order = self._create_order(rep_commission_note="15% Q3 promo")
+        order.refresh_from_db()
+        self.assertEqual(order.rep_commission_note, "15% Q3 promo")
+
 
 class OrderItemTests(TestCase):
     def setUp(self):
@@ -2052,14 +2060,17 @@ class OrderAdminFilterTests(TestCase):
         self.assertEqual(
             set(billing_fields),
             {"invoice_sent", "invoice_sent_on", "invoice_paid",
-             "invoice_paid_on", "commission_paid", "commission_paid_on"},
+             "invoice_paid_on", "commission_paid", "commission_paid_on",
+             "rep_commission_note"},
         )
         self.assertEqual(
             billing_rows,
             (("invoice_sent", "invoice_sent_on"),
              ("invoice_paid", "invoice_paid_on"),
-             ("commission_paid", "commission_paid_on")),
+             ("commission_paid", "commission_paid_on"),
+             "rep_commission_note"),
         )
+        self.assertNotIn("rep_commission_note", ma.list_display)
         for field in billing_fields:
             self.assertNotIn(field, ma.list_display)
         response = self.client.get(f"/admin/ourlives/order/{self.order1.pk}/change/")

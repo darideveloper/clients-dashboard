@@ -382,7 +382,7 @@ class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
 @admin.register(Order)
 class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
     sidebar_icon = "receipt"
-    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at")
+    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "submitted_at")
     list_display_links = ("order_number",)
     list_filter = (
         ("organization", AutocompleteSelectFilter),
@@ -427,6 +427,7 @@ class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
                 ("invoice_sent", "invoice_sent_on"),
                 ("invoice_paid", "invoice_paid_on"),
                 ("commission_paid", "commission_paid_on"),
+                "rep_commission_note",
             ),
         }),
         ("Details", {
