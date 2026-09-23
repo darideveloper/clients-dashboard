@@ -1779,21 +1779,47 @@ class CrmAdminRegistrationTests(TestCase):
             ContactInline,
             OrganizationAddressInline,
             OrderItemInline,
+            OrgOrderInline,
         )
 
         self.assertTrue(issubclass(ContactInline, UnfoldStackedInline))
         self.assertTrue(issubclass(OrganizationAddressInline, UnfoldStackedInline))
         self.assertTrue(issubclass(OrderItemInline, UnfoldTabularInline))
+        self.assertTrue(issubclass(OrgOrderInline, UnfoldTabularInline))
         self.assertEqual(ContactInline.extra, 0)
         self.assertEqual(OrganizationAddressInline.extra, 0)
         self.assertEqual(OrderItemInline.extra, 0)
+        self.assertEqual(OrgOrderInline.extra, 0)
+        self.assertFalse(OrgOrderInline.can_delete)
+        self.assertFalse(OrgOrderInline.show_change_link)
+        self.assertEqual(
+            tuple(OrgOrderInline.fields),
+            ("order_number", "number_of_scans", "submitted_at", "order_link"),
+        )
+        self.assertEqual(
+            tuple(OrgOrderInline.readonly_fields),
+            ("order_number", "number_of_scans", "submitted_at", "order_link"),
+        )
 
         from django.contrib import admin as admin_site
 
         self.assertEqual(
             tuple(admin_site.site._registry[Organization].inlines),
-            (ContactInline, OrganizationAddressInline),
+            (OrgOrderInline, ContactInline, OrganizationAddressInline),
         )
+
+    def test_order_link_display(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import OrgOrderInline
+
+        inline = OrgOrderInline(Order, admin_site.site)
+        self.assertEqual(inline.order_link(None), "")
+        self.assertEqual(inline.order_link(Order()), "")
+        link = inline.order_link(Order(pk=999))
+        self.assertIn("/admin/ourlives/order/999/change/", link)
+        self.assertIn("inlinechangelink", link)
+        self.assertIn(">Change<", link)
 
     def test_export_actions_inherited(self):
         from django.contrib import admin as admin_site
@@ -1846,12 +1872,12 @@ class CrmAdminRegistrationTests(TestCase):
             fs.formset.prefix: fs
             for fs in response.context["inline_admin_formsets"]
         }
-        self.assertEqual(set(prefixes), {"contacts", "addresses"})
+        self.assertEqual(set(prefixes), {"contacts", "addresses", "orders"})
         addr_prefix = next(
             prefix for prefix in prefixes
             if f"{prefix}-0-is_primary" in response.content.decode()
         )
-        contact_prefix = next(p for p in prefixes if p != addr_prefix)
+        contact_prefix = next(p for p in prefixes if p not in (addr_prefix, "orders"))
         data = {
             "name": org.name,
             "description": "",
@@ -1871,6 +1897,10 @@ class CrmAdminRegistrationTests(TestCase):
             f"{addr_prefix}-0-state": "",
             f"{addr_prefix}-0-zip": address.zip,
             f"{addr_prefix}-0-country": str(country.pk),
+            "orders-TOTAL_FORMS": "0",
+            "orders-INITIAL_FORMS": "0",
+            "orders-MIN_NUM_FORMS": "0",
+            "orders-MAX_NUM_FORMS": "1000",
             "_save": "Save",
         }
         response = self.client.post(change_url, data)
@@ -2116,9 +2146,14 @@ class ChildInlineCoexistenceTests(TestCase):
             fs.formset.prefix: fs
             for fs in response.context["inline_admin_formsets"]
         }
-        self.assertEqual(set(formsets), {"contacts", "addresses"})
+        self.assertEqual(set(formsets), {"contacts", "addresses", "orders"})
+        self.assertEqual(
+            [fs.formset.prefix for fs in response.context["inline_admin_formsets"]],
+            ["orders", "contacts", "addresses"],
+        )
         self.assertEqual(formsets["contacts"].formset.total_form_count(), 1)
         self.assertEqual(formsets["addresses"].formset.total_form_count(), 0)
+        self.assertEqual(formsets["orders"].formset.total_form_count(), 0)
 
     def test_order_change_renders_items_inline(self):
         org = Organization.objects.create(name="Order Org")
@@ -2371,11 +2406,35 @@ class OrderSummaryAdminTests(TestCase):
         return response
 
     def test_changelists_render_breakdowns(self):
-        for model in ("organization", "rep"):
-            with self.subTest(model=model):
-                content = self._changelist(model).content.decode()
-                for text in ("Agreed scans total", "Catalog items total", "Combined total", "USD 1,250.00"):
-                    self.assertIn(text, content)
+        content = self._changelist("rep").content.decode()
+        for text in ("Agreed scans total", "Catalog items total", "Combined total", "USD 1,250.00"):
+            self.assertIn(text, content)
+
+    def test_organization_changelist_is_slim(self):
+        from django.contrib import admin
+        ma = admin.site._registry[Organization]
+        self.assertEqual(
+            tuple(ma.list_display),
+            ("name", "order_count_display", "rep_link", "last_order_date_display", "usage_pct_display", "combined_total_display"),
+        )
+        content = self._changelist("organization").content.decode()
+        for text in ("Orders", "Rep", "Last order", "Combined total", "Usage %", "0%"):
+            self.assertIn(text, content)
+        for text in ("Agreed scans total", "Catalog items total"):
+            self.assertNotIn(text, content)
+
+    def test_organization_rep_link_and_usage_dummy(self):
+        from django.contrib import admin
+        ma = admin.site._registry[Organization]
+        rep = Rep.objects.create(first_name="Bob", last_name="Jones", email="bob@test.com")
+        org = Organization.objects.create(name="Linked Org", assigned_rep=rep)
+        linked = ma.rep_link(org)
+        self.assertIn(f"/admin/ourlives/rep/{rep.pk}/change/", linked)
+        self.assertIn("Bob Jones", linked)
+        self.assertEqual(ma.rep_link(self.empty), "—")
+        self.assertEqual(ma.rep_link(None), "—")
+        self.assertEqual(ma.usage_pct_display(org), "0%")
+        self.assertEqual(ma.usage_pct_display(None), "0%")
 
     def test_changelist_annotations_match_properties(self):
         for model in ("organization", "rep"):
@@ -2479,34 +2538,44 @@ class CrossLinkedChangeViewTests(TestCase):
         )
 
     def test_company_change_lists_orders(self):
+        self.order.number_of_scans = 500
+        self.order.save()
         response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.order.order_number)
         self.assertContains(
             response, reverse("admin:ourlives_order_change", args=[self.order.pk]),
         )
-        self.assertContains(response, "View all 1 order")
+        self.assertContains(response, "Total: 500 scans across 1 order")
+        self.assertNotContains(response, "View all 1 order")
+        self.assertContains(response, "inlinechangelink")
+        self.assertContains(response, ">Change<")
+
+    def test_order_link_view_label_without_change_permission(self):
+        viewer = User.objects.create_user("order_viewer", "v@test.com", "x", is_staff=True)
+        for codename in ("view_organization", "change_organization", "view_order"):
+            viewer.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(viewer)
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "inlineviewlink")
+        self.assertContains(response, ">View<")
+        self.assertNotContains(response, "inlinechangelink")
 
     def test_company_add_view_renders(self):
         self.assertEqual(self.client.get("/admin/ourlives/organization/add/").status_code, 200)
 
-    def test_company_orders_pagination_and_invalid_page(self):
+    def test_company_orders_inline_lists_all_with_total(self):
         for i in range(25):
             Order.objects.create(
                 organization=self.org, rep=self.rep, po_number=f"PO-P{i}",
+                number_of_scans=10,
             )
-        response = self.client.get(
-            f"/admin/ourlives/organization/{self.org.pk}/change/",
-            {"org_orders_page": 2},
-        )
+        response = self.client.get(f"/admin/ourlives/organization/{self.org.pk}/change/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Page 2 of 2")
-        bogus = self.client.get(
-            f"/admin/ourlives/organization/{self.org.pk}/change/",
-            {"org_orders_page": "bogus"},
-        )
-        self.assertEqual(bogus.status_code, 200)
-        self.assertContains(bogus, "Page 1 of 2")
+        self.assertContains(response, "Total: 250 scans across 26 orders")
+        last_number = self.org.orders.order_by("order_number").last().order_number
+        self.assertContains(response, last_number)
 
     def test_rep_lists_paginate_independently(self):
         for i in range(25):
@@ -2659,7 +2728,7 @@ class CrossLinkedChangeViewTests(TestCase):
             response, reverse("admin:ourlives_order_change", args=[self.order.pk]),
         )
         ma = admin_site.site._registry[Organization]
-        self.assertEqual(ma.orders_list(Organization(name="unsaved")), "—")
+        self.assertEqual(ma.total_scans_display(Organization(name="unsaved")), "—")
 
     def test_empty_states(self):
         bare_org = Organization.objects.create(name="Bare")

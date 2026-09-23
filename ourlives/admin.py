@@ -1,6 +1,8 @@
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.core.validators import EMPTY_VALUES
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
@@ -44,25 +46,70 @@ class OrganizationAddressInline(UnfoldStackedInline):
     autocomplete_fields = ("country",)
 
 
+class OrgOrderInline(UnfoldTabularInline):
+    model = Order
+    fields = ("order_number", "number_of_scans", "submitted_at", "order_link")
+    readonly_fields = ("order_number", "number_of_scans", "submitted_at", "order_link")
+    extra = 0
+    can_delete = False
+    show_change_link = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def get_formset(self, request, obj=None, **kwargs):
+        self._inline_request = request
+        return super().get_formset(request, obj, **kwargs)
+
+    @admin.display(description="")
+    def order_link(self, obj):
+        if obj is None or obj.pk is None:
+            return ""
+        request = getattr(self, "_inline_request", None)
+        if request is None or request.user.has_perm("ourlives.change_order"):
+            label, css = "Change", "inlinechangelink"
+        else:
+            label, css = "View", "inlineviewlink"
+        return format_html(
+            '<a href="{}" class="{}">{}</a>',
+            reverse("admin:ourlives_order_change", args=[obj.pk]),
+            css,
+            label,
+        )
+
+
 @admin.register(Organization)
 class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "business"
-    list_display = ("name", "description") + OrderSummaryAdminMixin.order_summary_displays + ("usage_pct_display",)
+    list_display = ("name", "order_count_display", "rep_link", "last_order_date_display", "usage_pct_display", "combined_total_display")
     list_display_links = ("name",)
-    list_filter = ("assigned_rep", UsageBucketFilter, UsageMinFilter, UsageMaxFilter)
+    list_select_related = ("assigned_rep",)
+    list_filter = ("assigned_rep",)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
-    inlines = (ContactInline, OrganizationAddressInline)
+    inlines = (OrgOrderInline, ContactInline, OrganizationAddressInline)
     fieldsets = (
         (None, {"fields": ("name", "description", "assigned_rep")}),
         ("Order summary", {"fields": OrderSummaryAdminMixin.order_summary_displays}),
-        ("Orders", {"fields": ("orders_list",)}),
+        ("Scans total", {"fields": ("total_scans_display",)}),
         ("Codes across orders", {"fields": ("codes_across_orders_list",)}),
         ("Codes (direct)", {"fields": ("codes_direct_list",)}),
     )
-    readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("orders_list", "codes_across_orders_list", "codes_direct_list")
+    readonly_fields = OrderSummaryAdminMixin.order_summary_displays + ("total_scans_display", "codes_across_orders_list", "codes_direct_list")
 
-    @admin.display(description="Orders")
-    def orders_list(self, obj):
+    @admin.display(description="Rep")
+    def rep_link(self, obj):
+        rep = getattr(obj, "assigned_rep", None) if obj is not None else None
+        if rep is None or rep.pk is None:
+            return "—"
+        return format_html(
+            '<a href="{}">{} {}</a>',
+            reverse("admin:ourlives_rep_change", args=[rep.pk]),
+            rep.first_name,
+            rep.last_name,
+        )
+
+    @admin.display(description="Total scans")
+    def total_scans_display(self, obj):
         if obj is None or obj.pk is None:
             return "—"
         request = getattr(self, "_change_request", None)
@@ -71,24 +118,8 @@ class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, UsageSt
             return "No orders yet"
         if request is not None and not request.user.has_perm("ourlives.view_order"):
             return f"{plural(total, 'order')}"
-        page = paginate_related(
-            self, obj.orders.order_by("order_number"), "org_orders_page"
-        )
-        rows = related_rows(
-            format_html(
-                '<a href="{}">{} — {} — {}</a>',
-                reverse("admin:ourlives_order_change", args=[o.pk]),
-                o.order_number,
-                o.po_number,
-                o.total_agreed_price,
-            )
-            for o in page.object_list
-        )
-        view_all = (
-            reverse("admin:ourlives_order_changelist")
-            + f"?organization__id__exact={obj.pk}"
-        )
-        return related_list(rows, related_footer(self, obj, page, "org_orders_page", view_all, f"View all {plural(total, 'order')}"))
+        scans = obj.orders.aggregate(s=Coalesce(Sum("number_of_scans"), 0))["s"]
+        return f"Total: {scans} scans across {plural(total, 'order')}"
 
     def _org_codes_list(self, obj, queryset, page_key, view_all_query):
         if obj is None or obj.pk is None:
