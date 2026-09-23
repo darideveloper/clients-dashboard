@@ -9,7 +9,7 @@ from django.urls import reverse
 from openpyxl import load_workbook
 
 from core.models import Brand
-from ourlives.models import AppSettings, InvitationCode, Organization, Project, StripeEvent
+from ourlives.models import AppSettings, InvitationCode, Order, Organization, Project, Rep, StripeEvent
 from utils.excel_export import (
     _primary_color,
     autosize_columns,
@@ -411,3 +411,49 @@ class ExportAllDetailRegressionTests(TestCase):
         wb_list = load_workbook(filename=io.BytesIO(r_list.content))
         wb_detail = load_workbook(filename=io.BytesIO(r_detail.content))
         self.assertEqual(sorted(wb_list.sheetnames), sorted(wb_detail.sheetnames))
+
+
+class OrderPrefetchExportTests(TestCase):
+    """Regression: changelist querysets carrying prefetch_related must export.
+
+    OrderAdmin.get_queryset prefetches order_types + items__product__currency;
+    bare qs.iterator() raises "chunk_size must be provided..." (ValueError).
+    """
+
+    def setUp(self):
+        self.client = Client()
+        self.superuser = User.objects.create_superuser(username="ord_admin", email="o@x.test", password="x")
+        self.client.force_login(self.superuser)
+        self.org = Organization.objects.create(name="O1")
+        self.rep = Rep.objects.create(first_name="R", last_name="X", email="r@x.test")
+        self.order = Order.objects.create(organization=self.org, rep=self.rep, po_number="PO-1")
+
+    def _prefetched_qs(self):
+        return Order.objects.prefetch_related("order_types", "items__product__currency")
+
+    def test_workbook_with_prefetch_queryset(self):
+        wb = build_workbook_for_queryset(Order, self._prefetched_qs(), include_related=False)
+        self.assertEqual(len(wb.sheetnames), 1)
+        self.assertEqual(wb.active.max_row, 2)  # header + 1 order
+
+    def test_workbook_with_prefetch_queryset_and_related(self):
+        wb = build_workbook_for_queryset(Order, self._prefetched_qs(), include_related=True)
+        # Main sheet + one per forward FK target (M2M/reverse-FK excluded)
+        self.assertEqual(len(wb.sheetnames), 1 + len(get_related_targets(Order)))
+        self.assertEqual(wb[wb.sheetnames[0]].max_row, 2)
+
+    def test_order_admin_export_selected(self):
+        url = reverse("admin:ourlives_order_changelist")
+        response = self.client.post(url, {"action": "export_selected", "_selected_action": [self.order.pk]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        wb = load_workbook(filename=io.BytesIO(response.content))
+        self.assertEqual(wb.active.max_row, 2)
+
+    def test_order_admin_export_selected_with_related(self):
+        url = reverse("admin:ourlives_order_changelist")
+        response = self.client.post(url, {"action": "export_selected_with_related", "_selected_action": [self.order.pk]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        wb = load_workbook(filename=io.BytesIO(response.content))
+        self.assertEqual(len(wb.sheetnames), 1 + len(get_related_targets(Order)))

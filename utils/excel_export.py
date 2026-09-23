@@ -310,16 +310,23 @@ def _write_sheet_for_model(wb, model, queryset, existing_names):
     else:
         ws.append(headers)
 
-    # Prepare queryset with select_related if possible
+    # Prepare queryset with select_related if possible; drop unused
+    # prefetches first (export reads concrete fields only) so iterator()
+    # can't raise "chunk_size must be provided after prefetch_related()".
     qs = queryset
+    if hasattr(qs, "prefetch_related"):
+        try:
+            qs = qs.prefetch_related(None)
+        except Exception:
+            pass
     if fk_names and hasattr(qs, "select_related"):
         try:
             qs = qs.select_related(*fk_names)
         except Exception:
             pass
 
-    # Iterate
-    iterator = qs.iterator() if hasattr(qs, "iterator") else iter(qs)
+    # Iterate (explicit chunk_size: required after prefetch_related)
+    iterator = qs.iterator(chunk_size=2000) if hasattr(qs, "iterator") else iter(qs)
     for obj in iterator:
         row = []
         for _, getter, _ in columns:
@@ -380,7 +387,7 @@ def build_workbook_for_queryset(model, queryset, include_related=False, existing
                 except Exception:
                     # Fallback: iterate objects
                     try:
-                        for obj in queryset.iterator() if hasattr(queryset, "iterator") else queryset:
+                        for obj in queryset.iterator(chunk_size=2000) if hasattr(queryset, "iterator") else queryset:
                             _id = getattr(obj, f.attname, None)
                             if _id is not None:
                                 distinct_ids.add(_id)
