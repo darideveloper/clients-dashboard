@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -1511,6 +1512,33 @@ class OrderTests(TestCase):
         self.assertIsNone(order.currency)
         self.assertIsNone(order.pilot_currency)
 
+    def test_billing_milestones_default_unset(self):
+        order = self._create_order()
+        self.assertFalse(order.invoice_sent)
+        self.assertIsNone(order.invoice_sent_on)
+        self.assertFalse(order.invoice_paid)
+        self.assertIsNone(order.invoice_paid_on)
+        self.assertFalse(order.commission_paid)
+        self.assertIsNone(order.commission_paid_on)
+
+    def test_billing_tick_without_date_persists(self):
+        order = self._create_order(invoice_sent=True)
+        order.refresh_from_db()
+        self.assertTrue(order.invoice_sent)
+        self.assertIsNone(order.invoice_sent_on)
+
+    def test_billing_date_without_tick_stays_unticked(self):
+        order = self._create_order(invoice_paid_on=date(2026, 9, 22))
+        order.refresh_from_db()
+        self.assertFalse(order.invoice_paid)
+        self.assertEqual(order.invoice_paid_on, date(2026, 9, 22))
+
+    def test_billing_full_pair_persists(self):
+        order = self._create_order(commission_paid=True, commission_paid_on=date(2026, 9, 22))
+        order.refresh_from_db()
+        self.assertTrue(order.commission_paid)
+        self.assertEqual(order.commission_paid_on, date(2026, 9, 22))
+
 
 class OrderItemTests(TestCase):
     def setUp(self):
@@ -2007,6 +2035,41 @@ class OrderAdminFilterTests(TestCase):
             self._changelist_pks({"q": self.order1.order_number}),
             {self.order1.pk},
         )
+
+    def test_billing_fieldset_on_change_page_only(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import OrderAdmin
+
+        ma = admin_site.site._registry[Order]
+        self.assertIsInstance(ma, OrderAdmin)
+        fieldsets = dict(ma.fieldsets)
+        self.assertIn("Billing", fieldsets)
+        billing_rows = fieldsets["Billing"]["fields"]
+        billing_fields = [
+            f for row in billing_rows for f in (row if isinstance(row, (tuple, list)) else (row,))
+        ]
+        self.assertEqual(
+            set(billing_fields),
+            {"invoice_sent", "invoice_sent_on", "invoice_paid",
+             "invoice_paid_on", "commission_paid", "commission_paid_on"},
+        )
+        self.assertEqual(
+            billing_rows,
+            (("invoice_sent", "invoice_sent_on"),
+             ("invoice_paid", "invoice_paid_on"),
+             ("commission_paid", "commission_paid_on")),
+        )
+        for field in billing_fields:
+            self.assertNotIn(field, ma.list_display)
+        response = self.client.get(f"/admin/ourlives/order/{self.order1.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        for field in billing_fields:
+            self.assertContains(response, f'name="{field}"')
+        changelist = self.client.get("/admin/ourlives/order/")
+        self.assertEqual(changelist.status_code, 200)
+        for field in billing_fields:
+            self.assertNotContains(changelist, field)
 
 
 @override_settings(STORAGES={

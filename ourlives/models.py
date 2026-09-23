@@ -647,6 +647,12 @@ class Order(models.Model):
     form_entry_key = models.CharField(max_length=100, null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
     hcaptcha_verified = models.BooleanField(default=False)
+    invoice_sent = models.BooleanField(default=False)
+    invoice_sent_on = models.DateField(null=True, blank=True)
+    invoice_paid = models.BooleanField(default=False)
+    invoice_paid_on = models.DateField(null=True, blank=True)
+    commission_paid = models.BooleanField(default=False)
+    commission_paid_on = models.DateField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Order"

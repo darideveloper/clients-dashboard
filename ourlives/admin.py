@@ -422,6 +422,13 @@ class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
                 "total_agreed_price_display", "submitted_at",
             ),
         }),
+        ("Billing", {
+            "fields": (
+                ("invoice_sent", "invoice_sent_on"),
+                ("invoice_paid", "invoice_paid_on"),
+                ("commission_paid", "commission_paid_on"),
+            ),
+        }),
         ("Details", {
             "fields": ("additional_information", "ip_address", "form_entry_key"),
         }),
