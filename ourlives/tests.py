@@ -1155,10 +1155,7 @@ class LookupAdminTests(TestCase):
         self.assertEqual(tuple(ma.search_fields), ("name", "description"))
 
         ma = admin_site.site._registry[Organization]
-        self.assertEqual(
-            tuple(ma.list_filter),
-            ("assigned_rep", UsageBucketFilter, UsageMinFilter, UsageMaxFilter),
-        )
+        self.assertEqual(tuple(ma.list_filter), ("assigned_rep",))
         self.assertEqual(
             tuple(ma.search_fields),
             ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email"),
@@ -2418,13 +2415,16 @@ class OrderSummaryAdminTests(TestCase):
             ("name", "order_count_display", "rep_link", "last_order_date_display", "usage_pct_display", "combined_total_display"),
         )
         content = self._changelist("organization").content.decode()
-        for text in ("Orders", "Rep", "Last order", "Combined total", "Usage %", "0%"):
+        for text in ("Orders", "Rep", "Last order", "Combined total", "Usage %", "—"):
             self.assertIn(text, content)
         for text in ("Agreed scans total", "Catalog items total"):
             self.assertNotIn(text, content)
 
-    def test_organization_rep_link_and_usage_dummy(self):
+    def test_organization_rep_link_and_usage_pct(self):
         from django.contrib import admin
+
+        from ourlives.models import annotate_organization_usage
+
         ma = admin.site._registry[Organization]
         rep = Rep.objects.create(first_name="Bob", last_name="Jones", email="bob@test.com")
         org = Organization.objects.create(name="Linked Org", assigned_rep=rep)
@@ -2433,8 +2433,15 @@ class OrderSummaryAdminTests(TestCase):
         self.assertIn("Bob Jones", linked)
         self.assertEqual(ma.rep_link(self.empty), "—")
         self.assertEqual(ma.rep_link(None), "—")
-        self.assertEqual(ma.usage_pct_display(org), "0%")
-        self.assertEqual(ma.usage_pct_display(None), "0%")
+        # Real annotated Usage % from UsageStatsAdminMixin (no dummy).
+        self.assertEqual(ma.usage_pct_display(org), "—")
+        self.assertEqual(ma.usage_pct_display(None), "—")
+        project = Project.objects.create(name="Usage Project")
+        AppSettings.get_solo()
+        AppSettings.objects.update(total_tokens=10_000)
+        InvitationCode.objects.create(project=project, organization=org, code="U-50", max_use=10, current_use=5)
+        annotated = annotate_organization_usage(Organization.objects.filter(pk=org.pk)).get()
+        self.assertEqual(ma.usage_pct_display(annotated), "50%")
 
     def test_changelist_annotations_match_properties(self):
         for model in ("organization", "rep"):

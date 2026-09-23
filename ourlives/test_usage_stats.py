@@ -166,24 +166,15 @@ class UsageAdminTests(UsageStatsFixtureMixin):
         self.assertEqual(self.result_pks(response)[-1], empty_order.pk)
 
     def test_organization_sort_and_filter(self):
-        response = self.client.get("/admin/ourlives/organization/?o=-8")
+        response = self.client.get("/admin/ourlives/organization/?o=-5")
         self.assertEqual(response.status_code, 200)
         self.assertIn(self.org.pk, self.result_pks(response))
 
     def test_organization_sort_ascending_nulls_last(self):
-        response = self.client.get("/admin/ourlives/organization/?o=8")
+        response = self.client.get("/admin/ourlives/organization/?o=5")
         self.assertEqual(response.status_code, 200)
         # Empty orgs (Legacy from migration 0005 + other_org) sort last.
         legacy = Organization.objects.get(name="Legacy")
         pks = self.result_pks(response)
         self.assertEqual(pks[0], self.org.pk)
         self.assertCountEqual(pks[-2:], [legacy.pk, self.other_org.pk])
-
-    def test_organization_bucket_filter(self):
-        # Combined org usage is (1+9)/(10+10) = 50% -> "half" bucket.
-        response = self.client.get("/admin/ourlives/organization/?usage_bucket=half")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.result_pks(response), [self.org.pk])
-        response = self.client.get("/admin/ourlives/organization/?usage_bucket=noquota")
-        legacy = Organization.objects.get(name="Legacy")  # data migration 0005
-        self.assertCountEqual(self.result_pks(response), [self.other_org.pk, legacy.pk])
