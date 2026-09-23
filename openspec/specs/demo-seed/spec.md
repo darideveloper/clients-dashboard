@@ -3,9 +3,7 @@
 ## Purpose
 
 Deterministic realistic ourlives sales-like seeding for exercising calculated fields and admin inlines in development and test environments.
-
 ## Requirements
-
 ### Requirement: Deterministic demo seed command with documented run command
 The system SHALL provide `ourlives/management/commands/seed_ourlives_demo.py` runnable as `python manage.py seed_ourlives_demo --seed 42 --reps 6 --orgs 10 --orders 25` with flags `--seed/--reps/--orgs/--orders/--tokens/--clear`, and SHALL document that exact command in `ourlives/docs/demo-seed.md`.
 
@@ -51,15 +49,11 @@ The system SHALL size `AppSettings.total_tokens` upfront (default generous, `--t
 - **THEN** at least one code shows `0%`, one partial, one `100%` `usage_percentage`, and one inactive code exists
 
 ### Requirement: Calculated-field branch coverage
-The seeded data SHALL exercise: `total_agreed_price` (normal + null scans + null cost), `is_pilot_order` (pilot-only, standard-only, multi-type, typeless), agreed-totals attribution (`currency` wins over `pilot_currency`, pilot-only, neither → `Uncategorized`), catalog-items attribution (order currency → pilot currency → product currency fallback), `combined_total` merge, an empty org/rep with zero orders, and a full org holding the most orders.
+The seeded data SHALL exercise: `total_agreed_price` (normal + null scans + null cost), `is_pilot_order` (pilot-only, standard-only, multi-type, typeless), agreed-totals attribution (`currency` wins over `pilot_currency`, pilot-only, neither → `No Currency`), catalog-items attribution (order currency → pilot currency → product currency fallback), `combined_total` merge, `total_order_value` per-order figure, an empty org/rep with zero orders, and a full org holding the most orders.
 
 #### Scenario: All summary branches present
 - **WHEN** seeding completes
-- **THEN** there exists an order with `number_of_scans=None`, one with `cost_per_scan=None`, one pilot / one standard / one multi-type / one typeless order, one `currency+pilot` order, one pilot-only order, one currency-less order with scans (→ `Uncategorized`), an item whose order currency differs from its product currency, an org with zero orders (its `last_order_date` is None and all its totals render `—`), a rep with zero orders, an order with zero items, and an order with zero invitation codes (empty items-inline / `codes_list` states)
-
-#### Scenario: Order dates spread across months
-- **WHEN** seeding completes
-- **THEN** seeded `Order.submitted_at` values span roughly 6 months (set via `queryset.update()` to bypass `auto_now_add`), so holders have differing `last_order_date` values and the admin `date_hierarchy` shows multiple months
+- **THEN** there exists an order with `number_of_scans=None`, one with `cost_per_scan=None`, one pilot / one standard / one multi-type / one typeless order, one `currency+pilot` order, one pilot-only order, one currency-less order with scans (→ `No Currency`), an item whose order currency differs from its product currency, an org with zero orders (its `last_order_date` is None and all its totals render `—`), a rep with zero orders, an order with zero items, and an order with zero invitation codes (empty items-inline / `codes_list` states)
 
 ### Requirement: Inline-family coverage
 The seeded data SHALL render every inline state: organizations with 0/1/multiple contacts and addresses, and orders with 0/1/multiple items (including one order with a duplicate product line), with `primary_contact`/`invoice_contact` drawn from the order's own organization.
@@ -74,3 +68,4 @@ Re-running with the same seed SHALL NOT duplicate lookup rows and SHALL NOT touc
 #### Scenario: Re-run is safe
 - **WHEN** the command runs twice with the same flags (second time with `--clear`)
 - **THEN** `Country` count stays 249, no duplicate `Demo` organizations exist, and no non-`Demo`/non-`test-` rows were deleted
+

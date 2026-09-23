@@ -1506,6 +1506,27 @@ class OrderTests(TestCase):
     def test_no_total_agreed_price_column(self):
         self.assertNotIn("total_agreed_price", [f.name for f in Order._meta.get_fields()])
 
+    def test_total_order_value_merges_agreed_and_items(self):
+        order = self._create_order(number_of_scans=500, cost_per_scan=Decimal("2.50"))
+        currency = Currency.objects.create(code="TTT", name="Test", exchange_rate=Decimal("1.00"))
+        product = Product.objects.create(currency=currency, name="Widget", unit_price=Decimal("20.00"))
+        OrderItem.objects.create(order=order, product=product, quantity=2, unit_price=Decimal("20.00"))
+        self.assertEqual(order.total_order_value, Decimal("1290.00"))
+
+    def test_total_order_value_nulls_treated_as_zero(self):
+        order = self._create_order()
+        currency = Currency.objects.create(code="UUU", name="Test2", exchange_rate=Decimal("1.00"))
+        product = Product.objects.create(currency=currency, name="Gadget", unit_price=Decimal("20.00"))
+        OrderItem.objects.create(order=order, product=product, quantity=1, unit_price=Decimal("20.00"))
+        self.assertEqual(order.total_order_value, Decimal("20.00"))
+
+    def test_total_order_value_zero_without_scans_or_items(self):
+        order = self._create_order()
+        self.assertEqual(order.total_order_value, Decimal("0"))
+
+    def test_no_total_order_value_column(self):
+        self.assertNotIn("total_order_value", [f.name for f in Order._meta.get_fields()])
+
     def test_currency_delete_sets_null(self):
         currency = Currency.objects.create(code="USD", name="US Dollar", exchange_rate=Decimal("1.00"))
         order = self._create_order(currency=currency, pilot_currency=currency)
@@ -1789,13 +1810,14 @@ class CrmAdminRegistrationTests(TestCase):
         self.assertEqual(OrgOrderInline.extra, 0)
         self.assertFalse(OrgOrderInline.can_delete)
         self.assertFalse(OrgOrderInline.show_change_link)
+        self.assertTrue(OrgOrderInline.hide_title)
         self.assertEqual(
             tuple(OrgOrderInline.fields),
-            ("order_number", "number_of_scans", "submitted_at", "order_link"),
+            ("order_number_link", "number_of_scans", "submitted_at", "total_order_value_display", "order_link"),
         )
         self.assertEqual(
             tuple(OrgOrderInline.readonly_fields),
-            ("order_number", "number_of_scans", "submitted_at", "order_link"),
+            ("order_number_link", "number_of_scans", "submitted_at", "total_order_value_display", "order_link"),
         )
 
         from django.contrib import admin as admin_site
@@ -1817,6 +1839,38 @@ class CrmAdminRegistrationTests(TestCase):
         self.assertIn("/admin/ourlives/order/999/change/", link)
         self.assertIn("inlinechangelink", link)
         self.assertIn(">Change<", link)
+
+    def test_order_number_link_display(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import OrgOrderInline
+
+        inline = OrgOrderInline(Order, admin_site.site)
+        self.assertEqual(inline.order_number_link(None), "")
+        order = Order(pk=999, order_number="OL-42")
+        link = inline.order_number_link(order)
+        self.assertIn("/admin/ourlives/order/999/change/", link)
+        self.assertIn("inlinechangelink", link)
+        self.assertIn(">OL-42<", link)
+
+    def test_total_order_value_display_readonly(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import OrgOrderInline
+
+        inline = OrgOrderInline(Order, admin_site.site)
+        self.assertEqual(inline.total_order_value_display(None), "—")
+        self.assertEqual(inline.total_order_value_display(Order()), "—")
+        currency = Currency.objects.create(code="UVW", name="Test", exchange_rate=Decimal("1.00"))
+        org = Organization.objects.create(name="Display Org")
+        rep = Rep.objects.create(first_name="A", last_name="B", email="a@b.com")
+        order = Order.objects.create(
+            organization=org, rep=rep, po_number="PO-D", currency=currency,
+            number_of_scans=10, cost_per_scan=Decimal("2.00"),
+        )
+        product = Product.objects.create(currency=currency, name="Widget", unit_price=Decimal("1.50"))
+        OrderItem.objects.create(order=order, product=product, quantity=2, unit_price=Decimal("1.50"))
+        self.assertEqual(inline.total_order_value_display(order), "UVW 23.00")
 
     def test_export_actions_inherited(self):
         from django.contrib import admin as admin_site
@@ -2118,6 +2172,32 @@ class OrderAdminFilterTests(TestCase):
         for field in billing_fields:
             self.assertNotContains(changelist, field)
 
+    def test_totals_display_and_terms_fieldset(self):
+        from django.contrib import admin as admin_site
+
+        from ourlives.admin import OrderAdmin
+
+        ma = admin_site.site._registry[Order]
+        self.assertIsInstance(ma, OrderAdmin)
+        self.assertIn("total_order_value_display", ma.list_display)
+        self.assertNotIn("total_agreed_price_display", ma.list_display)
+        terms = dict(ma.fieldsets)["Terms"]["fields"]
+        self.assertIn("total_agreed_price_display", terms)
+        self.assertIn("catalog_items_total_display", terms)
+        self.assertIn("total_order_value_display", terms)
+
+        self.order1.refresh_from_db()
+        order = Order.objects.prefetch_related("items__product__currency").get(pk=self.order1.pk)
+        self.assertEqual(ma.total_agreed_price_display(order), "—")
+        self.assertEqual(ma.catalog_items_total_display(order), "USD 30.00")
+        self.assertEqual(ma.total_order_value_display(order), "USD 30.00")
+        self.assertEqual(ma.total_order_value_display(None), "—")
+
+        response = self.client.get(f"/admin/ourlives/order/{self.order1.pk}/change/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Catalog items total")
+        self.assertContains(response, "Total Order Value")
+
 
 @override_settings(STORAGES={
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -2404,7 +2484,7 @@ class OrderSummaryAdminTests(TestCase):
 
     def test_changelists_render_breakdowns(self):
         content = self._changelist("rep").content.decode()
-        for text in ("Agreed scans total", "Catalog items total", "Combined total", "USD 1,250.00"):
+        for text in ("Agreed scans total", "Catalog items total", "Total Order Value", "USD 1,250.00"):
             self.assertIn(text, content)
 
     def test_organization_changelist_is_slim(self):
@@ -2415,7 +2495,7 @@ class OrderSummaryAdminTests(TestCase):
             ("name", "order_count_display", "rep_link", "last_order_date_display", "usage_pct_display", "combined_total_display"),
         )
         content = self._changelist("organization").content.decode()
-        for text in ("Orders", "Rep", "Last order", "Combined total", "Usage %", "—"):
+        for text in ("Orders", "Rep", "Last order", "Total Order Value", "Usage %", "—"):
             self.assertIn(text, content)
         for text in ("Agreed scans total", "Catalog items total"):
             self.assertNotIn(text, content)

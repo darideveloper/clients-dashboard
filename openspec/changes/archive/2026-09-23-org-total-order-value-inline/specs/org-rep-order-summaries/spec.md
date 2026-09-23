@@ -1,8 +1,5 @@
-# org-rep-order-summaries Specification
+## MODIFIED Requirements
 
-## Purpose
-Per-currency order summaries on Organization and Rep for the admin.
-## Requirements
 ### Requirement: Order summary properties on Organization and Rep
 
 The system SHALL provide five read-only calculated summaries on both `Organization` and `Rep` in `ourlives/models.py`, derived from the related `orders` (`related_name="orders"`, direct FK `Order.rep` for Rep scope — not via `Organization.assigned_rep`):
@@ -69,4 +66,3 @@ The system SHALL render money mappings as compact breakdown strings (`USD 1,750.
 #### Scenario: Breakdown ordering
 - **WHEN** a record has EUR and USD amounts
 - **THEN** the rendered string lists EUR before USD
-

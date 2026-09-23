@@ -206,7 +206,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Orders ({orders.count()}):")
         for o in orders:
             curr = o.currency.code if o.currency_id else (
-                o.pilot_currency.code if o.pilot_currency_id else "Uncategorized")
+                o.pilot_currency.code if o.pilot_currency_id else "No Currency")
             types = ",".join(o.order_types.values_list("code", flat=True)) or "—"
             self.stdout.write(
                 f"    • {o.order_number} — {o.po_number} — "

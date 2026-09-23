@@ -37,7 +37,7 @@ inactive).
 
 | Calculated field / inline | Covered by |
 |---|---|
-| `agreed_scans_total` (`currency` wins, pilot-only, `Uncategorized`, nulls → 0) | showcase + random orders |
+| `agreed_scans_total` (`currency` wins, pilot-only, `No Currency`, nulls → 0) | showcase + random orders |
 | `catalog_items_total` (order → pilot → product fallback) | USD order + EUR-product item |
 | `combined_total`, `order_count`, `last_order_date` (+ empty `—` states) | Empty Org (0 orders) vs Full Org (most orders) |
 | `total_agreed_price`, `is_pilot_order` (pilot/standard/multi/typeless) | order type mix |

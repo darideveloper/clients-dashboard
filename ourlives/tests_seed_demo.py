@@ -79,8 +79,13 @@ class SeedDemoCommandTests(TestCase):
         self.assertTrue(InvitationCode.objects.filter(
             current_use__gt=0).exists())
         full = [o for o in Organization.objects.filter(
-            name__startswith="Demo ") if "Uncategorized" in o.combined_total]
-        self.assertTrue(full, "no org shows an Uncategorized combined total")
+            name__startswith="Demo ") if "No Currency" in o.combined_total]
+        self.assertTrue(full, "no org shows a No Currency combined total")
+        order_with_items = Order.objects.filter(items__isnull=False).select_related(
+            "currency", "pilot_currency").prefetch_related("items__product__currency").first()
+        self.assertIsNotNone(order_with_items, "no seeded order holds items")
+        items_sum = sum(i.quantity * i.unit_price for i in order_with_items.items.all())
+        self.assertGreaterEqual(order_with_items.total_order_value, items_sum)
         empty = Organization.objects.get(name="Demo Empty Org")
         self.assertEqual(empty.order_count, 0)
         self.assertIsNone(empty.last_order_date)

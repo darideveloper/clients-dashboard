@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.core.validators import EMPTY_VALUES
@@ -19,11 +21,29 @@ from unfold.contrib.filters.admin import (
 )
 
 from project.admin_base import ChangeRequestStashMixin, ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase, UsageBucketFilter, UsageMaxFilter, UsageMinFilter, UsageStatsAdminMixin, paginate_related, plural, related_footer, related_list, related_rows
-from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, annotate_code_usage, annotate_order_usage, annotate_organization_usage
+from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, UNCATEGORIZED_CURRENCY, _order_currency_code, annotate_code_usage, annotate_order_usage, annotate_organization_usage
 
 
 def can_purchase(request):
     return request.user.is_staff and request.user.has_module_perms("ourlives")
+
+
+def format_order_money(order, amount):
+    """Single per-order money string ('CODE amount', '—' when zero).
+
+    Resolves one display code: order currency → pilot currency → first
+    resolvable product currency → 'No Currency'. Mixed-currency items render
+    under the first resolvable code (same rule as the org rollup, single figure).
+    """
+    if order is None or order.pk is None or not amount:
+        return "—"
+    code = _order_currency_code(order)
+    if code is None:
+        code = next(
+            (item.product.currency.code for item in order.items.all() if item.product_id and item.product.currency_id),
+            None,
+        )
+    return f"{code} {amount:,.2f}" if code else f"{UNCATEGORIZED_CURRENCY} {amount:,.2f}"
 
 
 @admin.register(Project)
@@ -48,34 +68,63 @@ class OrganizationAddressInline(UnfoldStackedInline):
 
 class OrgOrderInline(UnfoldTabularInline):
     model = Order
-    fields = ("order_number", "number_of_scans", "submitted_at", "order_link")
-    readonly_fields = ("order_number", "number_of_scans", "submitted_at", "order_link")
+    fields = ("order_number_link", "number_of_scans", "submitted_at", "total_order_value_display", "order_link")
+    readonly_fields = ("order_number_link", "number_of_scans", "submitted_at", "total_order_value_display", "order_link")
     extra = 0
     can_delete = False
     show_change_link = False
+    hide_title = True
 
     def has_add_permission(self, request, obj=None):
         return False
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("currency", "pilot_currency")
+            .prefetch_related("items__product__currency")
+        )
+
+    @admin.display(description="Total Order Value")
+    def total_order_value_display(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        return format_order_money(obj, obj.total_order_value)
 
     def get_formset(self, request, obj=None, **kwargs):
         self._inline_request = request
         return super().get_formset(request, obj, **kwargs)
 
-    @admin.display(description="")
-    def order_link(self, obj):
+    def _order_link(self, obj, heading):
         if obj is None or obj.pk is None:
             return ""
         request = getattr(self, "_inline_request", None)
         if request is None or request.user.has_perm("ourlives.change_order"):
-            label, css = "Change", "inlinechangelink"
+            label, css = heading, "inlinechangelink"
         else:
-            label, css = "View", "inlineviewlink"
+            label, css = heading, "inlineviewlink"
         return format_html(
             '<a href="{}" class="{}">{}</a>',
             reverse("admin:ourlives_order_change", args=[obj.pk]),
             css,
             label,
         )
+
+    @admin.display(description="Order number")
+    def order_number_link(self, obj):
+        if obj is None or obj.pk is None:
+            return ""
+        return self._order_link(obj, obj.order_number)
+
+    @admin.display(description="")
+    def order_link(self, obj):
+        heading = (
+            "Change"
+            if (getattr(self, "_inline_request", None) is None or getattr(self, "_inline_request").user.has_perm("ourlives.change_order"))
+            else "View"
+        )
+        return self._order_link(obj, heading)
 
 
 @admin.register(Organization)
@@ -423,7 +472,7 @@ class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
 @admin.register(Order)
 class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "receipt"
-    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "submitted_at", "usage_pct_display")
+    list_display = ("order_number", "organization", "rep", "po_number", "total_order_value_display", "submitted_at", "usage_pct_display")
     list_display_links = ("order_number",)
     list_filter = (
         ("organization", AutocompleteSelectFilter),
@@ -463,7 +512,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
             "fields": (
                 "is_upgrade_from_pilot", "is_referral_order", "referral_organisation",
                 "hcaptcha_verified", "is_pilot_order_display",
-                "total_agreed_price_display", "submitted_at",
+                "total_agreed_price_display", "catalog_items_total_display", "total_order_value_display", "submitted_at",
             ),
         }),
         ("Billing", {
@@ -482,7 +531,8 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
         }),
     )
     readonly_fields = (
-        "total_agreed_price_display", "is_pilot_order_display", "submitted_at",
+        "total_agreed_price_display", "catalog_items_total_display", "total_order_value_display",
+        "is_pilot_order_display", "submitted_at",
         "organization_card", "rep_card", "contacts_list", "codes_list",
     )
 
@@ -494,11 +544,28 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
                 "currency", "pilot_currency",
             )
             .prefetch_related("order_types")
+            .prefetch_related("items__product__currency")
         )
 
-    @admin.display(description="Total agreed")
+    @admin.display(description="Agreed scans total")
     def total_agreed_price_display(self, obj):
-        return obj.total_agreed_price
+        if obj is None or obj.pk is None:
+            return "—"
+        return format_order_money(obj, obj.total_agreed_price)
+
+    @admin.display(description="Catalog items total")
+    def catalog_items_total_display(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        items = obj.items.all()
+        total = sum((item.quantity * item.unit_price for item in items), Decimal("0"))
+        return format_order_money(obj, total)
+
+    @admin.display(description="Total Order Value")
+    def total_order_value_display(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        return format_order_money(obj, obj.total_order_value)
 
     @admin.display(description="Pilot", boolean=True)
     def is_pilot_order_display(self, obj):

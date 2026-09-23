@@ -1,8 +1,5 @@
-# org-orders-inline Specification
+## MODIFIED Requirements
 
-## Purpose
-Display-only tabular Orders inline on the Organization detail page showing only relevant columns (`order_number`, `number_of_scans`, `submitted_at`), plus a readonly total-scans line. Replaces the hand-rolled `orders_list` HTML section.
-## Requirements
 ### Requirement: Orders inline table
 
 The system SHALL render a display-only tabular Orders inline on the Organization change page with exactly the columns `order_number_link`, `number_of_scans`, `submitted_at`, `total_order_value_display`, and a trailing action column with a blank header, plus a per-row link to each Order change page. The order-number cell SHALL itself link to the Order change page with Unfold link styling. The inline SHALL hide its per-row title row. The inline SHALL allow no adding, editing, or deleting. The inline section SHALL render first among the Organization detail inline sections.
@@ -32,20 +29,3 @@ The system SHALL render a display-only tabular Orders inline on the Organization
 #### Scenario: Empty row
 - **WHEN** the inline renders its empty template row (unsaved instance)
 - **THEN** the action cell is blank with no link.
-
-### Requirement: Total scans line
-
-The system SHALL render a readonly total-scans line on the Organization change page as `Total: N scans across M orders`, where N is the sum of `number_of_scans` over all of the organization's orders (nulls count as 0) and M is the order count.
-
-#### Scenario: Total shown
-- **WHEN** a staff user opens an Organization with 2 orders holding 500 and null scans
-- **THEN** the line reads `Total: 500 scans across 2 orders`.
-
-#### Scenario: No orders
-- **WHEN** a staff user opens an Organization with no orders
-- **THEN** no total line is shown (empty state instead).
-
-#### Scenario: Without order permission
-- **WHEN** a staff user without Order view permission opens an Organization with orders
-- **THEN** the line shows only the count (`"N orders"`), never the scan sum.
-

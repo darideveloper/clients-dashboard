@@ -1,8 +1,5 @@
-# organization-management Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-organization-model. Update Purpose after archive.
-## Requirements
 ### Requirement: Organization CRUD
 
 The system SHALL provide an Organization model with fields for `name` (unique, max 100 chars) and `description` (text, blankable). The system SHALL register Organization in the Django admin with search by name and filtered list display. The admin list SHALL show exactly six columns via `list_display=("name","order_count_display","rep_link","last_order_date_display","usage_pct_display","combined_total_display")`, where `order_count_display` and `last_order_date_display` are sortable via `ordering="_order_count"` / `ordering="_last_order_date"` on the annotated queryset fields, `rep_link` renders "First Last" linked to the Rep change page (or `—` when unassigned, non-sortable), `usage_pct_display` renders the dummy literal `0%` (display-only, non-sortable), and `combined_total_display` renders the per-currency combined breakdown last under the "Total Order Value" label (display-only, bulk-attached, no per-row queries). The admin change form SHALL include a readonly "Order summary" section exposing the five summaries with their labels and help texts (see `org-rep-order-summaries`).
@@ -26,4 +23,3 @@ The system SHALL provide an Organization model with fields for `name` (unique, m
 #### Scenario: Organization summary section
 - **WHEN** a staff user opens an Organization change form
 - **THEN** a readonly "Order summary" section shows the five summaries with labels and help texts, and all existing fields and inlines keep working unchanged
-

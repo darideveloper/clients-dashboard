@@ -254,7 +254,7 @@ class OrderSummaryAdminMixin:
     def catalog_items_total_display(self, obj):
         return self._breakdown_display(obj, "_catalog_items_total", "catalog_items_total")
 
-    @admin.display(description="Combined total")
+    @admin.display(description="Total Order Value")
     def combined_total_display(self, obj):
         return self._breakdown_display(obj, "_combined_total", "combined_total")
 

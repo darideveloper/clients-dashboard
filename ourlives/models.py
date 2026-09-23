@@ -18,7 +18,7 @@ def generate_order_number():
     return "OL-" + uuid.uuid4().hex[:6].upper()
 
 
-UNCATEGORIZED_CURRENCY = "Uncategorized"
+UNCATEGORIZED_CURRENCY = "No Currency"
 
 ORDER_SUMMARY_HELP_TEXTS = {
     "order_count": "Number of orders linked to this record (Order.organization / Order.rep).",
@@ -676,6 +676,18 @@ class Order(models.Model):
         if self.number_of_scans is None or self.cost_per_scan is None:
             return Decimal("0")
         return self.number_of_scans * self.cost_per_scan
+
+    @property
+    def total_order_value(self):
+        items = (
+            self.items.select_related("product__currency").all()
+            if self.pk is not None
+            else []
+        )
+        return self.total_agreed_price + sum(
+            (item.quantity * item.unit_price for item in items),
+            Decimal("0"),
+        )
 
 
 class OrderItem(models.Model):
