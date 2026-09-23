@@ -150,7 +150,7 @@ class UsageAdminTests(UsageStatsFixtureMixin):
         self.assertEqual(self.result_pks(response), [self.high_code.pk])
 
     def test_order_sort_and_filter(self):
-        response = self.client.get("/admin/ourlives/order/?o=-9")
+        response = self.client.get("/admin/ourlives/order/?o=-7")
         self.assertEqual(response.status_code, 200)
         self.assertLess(
             self.result_pks(response).index(self.high_order.pk),
@@ -161,7 +161,7 @@ class UsageAdminTests(UsageStatsFixtureMixin):
 
     def test_order_sort_ascending_nulls_last(self):
         empty_order = self.make_order(self.org, "OL-ADM-3")
-        response = self.client.get("/admin/ourlives/order/?o=9")
+        response = self.client.get("/admin/ourlives/order/?o=7")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.result_pks(response)[-1], empty_order.pk)
 

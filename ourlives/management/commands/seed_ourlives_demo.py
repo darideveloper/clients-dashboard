@@ -125,9 +125,12 @@ class Command(BaseCommand):
     def _ensure_order_defaults(self):
         """DB-level DEFAULT false for drift columns other agents migrated.
 
-        Runs outside the seed transaction (ALTER can't run with pending
-        trigger events). No-op when models already carry the fields.
+        Postgres-only syntax; skip on sqlite (tests). Runs outside the
+        seed transaction (ALTER can't run with pending trigger events).
+        No-op when models already carry the fields.
         """
+        if connection.vendor != "postgresql":
+            return
         with connection.cursor() as cur:
             cols = {c.name for c in connection.introspection.get_table_description(cur, "ourlives_order")}
         for col in ("commission_paid", "invoice_paid", "invoice_sent"):
