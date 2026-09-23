@@ -1148,12 +1148,16 @@ class LookupAdminTests(TestCase):
 
     def test_search_filter_tuning(self):
         from django.contrib import admin as admin_site
+        from project.admin_base import UsageBucketFilter, UsageMaxFilter, UsageMinFilter
 
         ma = admin_site.site._registry[Project]
         self.assertEqual(tuple(ma.search_fields), ("name", "description"))
 
         ma = admin_site.site._registry[Organization]
-        self.assertEqual(tuple(ma.list_filter), ("assigned_rep",))
+        self.assertEqual(
+            tuple(ma.list_filter),
+            ("assigned_rep", UsageBucketFilter, UsageMinFilter, UsageMaxFilter),
+        )
         self.assertEqual(
             tuple(ma.search_fields),
             ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email"),
@@ -1161,7 +1165,8 @@ class LookupAdminTests(TestCase):
 
         ma = admin_site.site._registry[InvitationCode]
         self.assertEqual(
-            tuple(ma.list_filter), ("is_active", "project", "organization", "code_type")
+            tuple(ma.list_filter),
+            ("is_active", "project", "organization", "code_type", UsageBucketFilter, UsageMinFilter, UsageMaxFilter),
         )
         self.assertEqual(
             tuple(ma.search_fields),
@@ -1686,6 +1691,7 @@ class CrmAdminRegistrationTests(TestCase):
             ActiveCurrencyDropdownFilter,
             OrderProductFilter,
         )
+        from project.admin_base import UsageBucketFilter, UsageMaxFilter, UsageMinFilter
         from unfold.contrib.filters.admin import (
             AutocompleteSelectFilter,
             FieldTextFilter,
@@ -1708,6 +1714,9 @@ class CrmAdminRegistrationTests(TestCase):
                 "is_referral_order",
                 ("currency", ActiveCurrencyDropdownFilter),
                 ("pilot_currency", ActiveCurrencyDropdownFilter),
+                UsageBucketFilter,
+                UsageMinFilter,
+                UsageMaxFilter,
             ),
         )
         self.assertTrue(ma.list_filter_submit)

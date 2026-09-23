@@ -16,8 +16,8 @@ from unfold.contrib.filters.admin import (
     RelatedDropdownFilter,
 )
 
-from project.admin_base import ChangeRequestStashMixin, ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase, paginate_related, plural, related_footer, related_list, related_rows
-from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent
+from project.admin_base import ChangeRequestStashMixin, ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase, UsageBucketFilter, UsageMaxFilter, UsageMinFilter, UsageStatsAdminMixin, paginate_related, plural, related_footer, related_list, related_rows
+from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, annotate_code_usage, annotate_order_usage, annotate_organization_usage
 
 
 def can_purchase(request):
@@ -45,11 +45,11 @@ class OrganizationAddressInline(UnfoldStackedInline):
 
 
 @admin.register(Organization)
-class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, OurlivesModelAdminBase):
+class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "business"
-    list_display = ("name", "description") + OrderSummaryAdminMixin.order_summary_displays
+    list_display = ("name", "description") + OrderSummaryAdminMixin.order_summary_displays + ("usage_pct_display",)
     list_display_links = ("name",)
-    list_filter = ("assigned_rep",)
+    list_filter = ("assigned_rep", UsageBucketFilter, UsageMinFilter, UsageMaxFilter)
     search_fields = ("name", "description", "assigned_rep__first_name", "assigned_rep__last_name", "assigned_rep__email")
     inlines = (ContactInline, OrganizationAddressInline)
     fieldsets = (
@@ -139,24 +139,34 @@ class OrganizationAdmin(ChangeRequestStashMixin, OrderSummaryAdminMixin, Ourlive
             f"?organization__id__exact={obj.pk}",
         )
 
+    def get_queryset(self, request):
+        return annotate_organization_usage(super().get_queryset(request))
+
 
 @admin.register(InvitationCode)
-class InvitationCodeAdmin(OurlivesModelAdminBase):
+class InvitationCodeAdmin(UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "key"
     list_display = ("code", "project", "organization", "is_active", "max_use", "current_use", "usage_percentage")
     list_display_links = ("code",)
-    list_filter = ("is_active", "project", "organization", "code_type")
+    list_filter = ("is_active", "project", "organization", "code_type", UsageBucketFilter, UsageMinFilter, UsageMaxFilter)
     search_fields = ("^code", "project__name", "organization__name", "order__order_number", "code_type__code", "code_type__name")
     search_help_text = "Search by code, project, organization, order number, or code type."
     readonly_fields = ("current_use",)
+    list_per_page = 50
     autocomplete_fields = ("project", "organization")
     list_editable = ("is_active",)
 
-    @admin.display(description="Usage %")
+    @admin.display(description="Usage %", ordering="_usage_pct")
     def usage_percentage(self, obj):
-        if obj.max_use == 0:
-            return "\u2014"
-        return f"{obj.current_use / obj.max_use * 100:.0f}%"
+        pct = getattr(obj, "_usage_pct", None)
+        if pct is None:
+            if obj is None or not obj.max_use:
+                return "—"
+            pct = obj.current_use / obj.max_use * 100
+        return f"{pct:.0f}%"
+
+    def get_queryset(self, request):
+        return annotate_code_usage(super().get_queryset(request))
 
     def save_model(self, request, obj, form, change):
         try:
@@ -380,9 +390,9 @@ class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
 
 
 @admin.register(Order)
-class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
+class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "receipt"
-    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at")
+    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "is_pilot_order_display", "hcaptcha_verified", "submitted_at", "usage_pct_display")
     list_display_links = ("order_number",)
     list_filter = (
         ("organization", AutocompleteSelectFilter),
@@ -398,6 +408,9 @@ class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
         "is_referral_order",
         ("currency", ActiveCurrencyDropdownFilter),
         ("pilot_currency", ActiveCurrencyDropdownFilter),
+        UsageBucketFilter,
+        UsageMinFilter,
+        UsageMaxFilter,
     )
     list_filter_submit = True
     search_fields = ("^order_number", "^po_number", "organization__name", "rep__first_name", "rep__last_name", "rep__email", "primary_contact__last_name", "primary_contact__email", "invoice_contact__last_name", "invoice_contact__email", "referral_organisation")
@@ -435,7 +448,7 @@ class OrderAdmin(ChangeRequestStashMixin, OurlivesModelAdminBase):
     )
 
     def get_queryset(self, request):
-        return (
+        return annotate_order_usage(
             super().get_queryset(request)
             .select_related(
                 "organization", "rep", "primary_contact", "invoice_contact",

@@ -3,8 +3,9 @@ from io import BytesIO
 from urllib.parse import quote
 
 from django.contrib import admin, messages
+from django.contrib.admin.views.main import ChangeList
 from django.core.paginator import Paginator
-from django.db.models import Count, Max
+from django.db.models import Count, F, Max, Q
 from django.http import HttpResponse, QueryDict
 from django.shortcuts import redirect
 from django.urls import reverse
@@ -263,3 +264,113 @@ class OrderSummaryAdminMixin:
             return None
         value = getattr(obj, "_last_order_date", None)
         return obj.last_order_date if value is None else value
+
+
+USAGE_FIELD = "_usage_pct"
+
+USAGE_BUCKETS = (
+    ("unused", "Unused (0%)", Q(_usage_pct=0)),
+    ("low", "Low (>0–<50%)", Q(_usage_pct__gt=0, _usage_pct__lt=50)),
+    ("half", "Half (50–<80%)", Q(_usage_pct__gte=50, _usage_pct__lt=80)),
+    ("warning", "Warning (80–<100%)", Q(_usage_pct__gte=80, _usage_pct__lt=100)),
+    ("full", "Full (100%)", Q(_usage_pct=100)),
+    ("noquota", "No quota", Q(_usage_pct__isnull=True)),
+)
+
+USAGE_THRESHOLD_CHOICES = (
+    ("25", "≥ 25%"),
+    ("50", "≥ 50%"),
+    ("80", "≥ 80%"),
+    ("90", "≥ 90%"),
+    ("100", "= 100%"),
+)
+
+USAGE_MAX_CHOICES = (
+    ("25", "≤ 25%"),
+    ("50", "≤ 50%"),
+    ("80", "≤ 80%"),
+    ("90", "≤ 90%"),
+    ("99", "< 100%"),
+)
+
+
+class UsageBucketFilter(admin.SimpleListFilter):
+    title = "usage"
+    parameter_name = "usage_bucket"
+
+    def lookups(self, request, model_admin):
+        return [(value, label) for value, label, _ in USAGE_BUCKETS]
+
+    def queryset(self, request, queryset):
+        for value, _label, cond in USAGE_BUCKETS:
+            if self.value() == value:
+                return queryset.filter(cond)
+        return queryset
+
+
+class UsageMinFilter(admin.SimpleListFilter):
+    title = "usage at least"
+    parameter_name = "usage_min"
+
+    def lookups(self, request, model_admin):
+        return USAGE_THRESHOLD_CHOICES
+
+    def queryset(self, request, queryset):
+        if self.value():
+            try:
+                return queryset.filter(_usage_pct__gte=float(self.value()))
+            except (TypeError, ValueError):
+                pass
+        return queryset
+
+
+class UsageMaxFilter(admin.SimpleListFilter):
+    title = "usage at most"
+    parameter_name = "usage_max"
+
+    def lookups(self, request, model_admin):
+        return USAGE_MAX_CHOICES
+
+    def queryset(self, request, queryset):
+        if self.value():
+            try:
+                return queryset.filter(_usage_pct__lte=float(self.value()))
+            except (TypeError, ValueError):
+                pass
+        return queryset
+
+
+class UsageOrderingChangeList(ChangeList):
+    """ChangeList forcing NULLS LAST when sorting by the usage annotation.
+
+    Django's request-driven ordering keeps DB-default NULL placement
+    (Postgres puts NULLs first on DESC). Rewriting the usage OrderBy here
+    keeps `—` rows last in both directions.
+    """
+
+    def get_ordering(self, request, queryset):
+        ordering = super().get_ordering(request, queryset)
+        fixed = []
+        for item in ordering:
+            if isinstance(item, str) and item.lstrip("-") == USAGE_FIELD:
+                expr = F(USAGE_FIELD)
+                fixed.append(expr.desc(nulls_last=True) if item.startswith("-") else expr.asc(nulls_last=True))
+            else:
+                fixed.append(item)
+        return fixed
+
+
+class UsageStatsAdminMixin:
+    """Sortable/filterable token-weighted usage % column.
+
+    Expects `get_queryset` to annotate `_usage_pct` (see
+    `ourlives.models.annotate_{code,order,organization}_usage`).
+    """
+
+    def get_changelist(self, request):
+        return UsageOrderingChangeList
+
+    @admin.display(description="Usage %", ordering=USAGE_FIELD)
+    def usage_pct_display(self, obj):
+        pct = getattr(obj, USAGE_FIELD, None) if obj is not None else None
+        return "—" if pct is None else f"{pct:.0f}%"

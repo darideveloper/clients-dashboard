@@ -4,7 +4,9 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Max
+from django.db.models import Case, ExpressionWrapper, F, FloatField, Max, OuterRef, Q, Subquery, Sum, Value, When
+from django.db.models.functions import Coalesce
+from django.db.models.lookups import Exact
 from solo.models import SingletonModel
 
 
@@ -693,6 +695,72 @@ class OrderItem(models.Model):
     @property
     def line_total(self):
         return self.quantity * self.unit_price
+
+
+def usage_pct_expression(used_expr, max_expr):
+    """Token-weighted usage % expression; NULL when quota is zero/unknown.
+
+    `used_expr`/`max_expr` accept field names, F() objects, or aggregates.
+    Sums aggregate to NULL on empty sets, which also yields NULL (renders —).
+    """
+    return Case(
+        When(Exact(max_expr, 0), then=None),
+        default=ExpressionWrapper(used_expr * 100.0 / max_expr, output_field=FloatField()),
+        output_field=FloatField(),
+    )
+
+
+def annotate_code_usage(queryset):
+    """Per-row usage % for InvitationCode querysets (zero JOINs)."""
+    return queryset.annotate(
+        _usage_pct=usage_pct_expression(F("current_use"), F("max_use")),
+    )
+
+
+def annotate_order_usage(queryset):
+    """Token-weighted usage over an order's direct invitation codes."""
+    return queryset.annotate(
+        _codes_used=Sum("invitation_codes__current_use"),
+        _codes_max=Sum("invitation_codes__max_use"),
+    ).annotate(
+        _usage_pct=usage_pct_expression(F("_codes_used"), F("_codes_max")),
+    )
+
+
+def _org_code_sum(field):
+    """Disjoint subquery sums so a dually-linked code counts exactly once.
+
+    Direct subquery: codes owned by the org whose order is absent or belongs
+    elsewhere. Via-orders subquery: every code on the org's orders.
+    """
+    direct = (
+        InvitationCode.objects.filter(organization=OuterRef("pk"))
+        .filter(Q(order__isnull=True) | ~Q(order__organization=OuterRef("pk")))
+        .order_by()
+        .values("organization")
+        .annotate(total=Sum(field))
+        .values("total")[:1]
+    )
+    via_orders = (
+        InvitationCode.objects.filter(order__organization=OuterRef("pk"))
+        .order_by()
+        .values("order__organization")
+        .annotate(total=Sum(field))
+        .values("total")[:1]
+    )
+    return Coalesce(Subquery(direct, output_field=models.IntegerField()), 0) + Coalesce(
+        Subquery(via_orders, output_field=models.IntegerField()), 0
+    )
+
+
+def annotate_organization_usage(queryset):
+    """Combined token-weighted usage: direct codes + order codes, dedup-safe."""
+    return queryset.annotate(
+        _codes_used=_org_code_sum("current_use"),
+        _codes_max=_org_code_sum("max_use"),
+    ).annotate(
+        _usage_pct=usage_pct_expression(F("_codes_used"), F("_codes_max")),
+    )
 
 
 def attach_money_breakdowns(holders):
