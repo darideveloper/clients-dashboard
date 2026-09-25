@@ -82,10 +82,11 @@ class InvitationCodeCreationTests(InvitationCodeBaseTestCase):
         code = InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=10)
         self.assertIsNotNone(code.pk)
 
-    def test_create_code_exceeding_pool_limit(self):
+    def test_create_code_exceeding_pool_limit_succeeds(self):
         InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=100)
-        with self.assertRaises(ValidationError):
-            InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=1)
+        code = InvitationCode.objects.create(project=self.project, organization=self.organization, max_use=1)
+        self.assertIsNotNone(code.pk)
+        self.assertEqual(AppSettings.get_solo().tokens_available, -1)
 
     def test_protect_organization_with_active_codes(self):
         org = Organization.objects.create(name="Protected Org")
@@ -107,12 +108,13 @@ class InvitationCodeUpdateTests(InvitationCodeBaseTestCase):
         self.code.refresh_from_db()
         self.assertEqual(self.code.max_use, 15)
 
-    def test_update_increasing_max_use_beyond_limit(self):
+    def test_update_increasing_max_use_beyond_limit_succeeds(self):
         other = Project.objects.create(name="Other")
         InvitationCode.objects.create(project=other, organization=self.organization, max_use=90)
         self.code.max_use = 11
-        with self.assertRaises(ValidationError):
-            self.code.save()
+        self.code.save()
+        self.code.refresh_from_db()
+        self.assertEqual(self.code.max_use, 11)
 
     def test_reject_max_use_reduction_below_current_use(self):
         self.code.max_use = 2
@@ -133,15 +135,16 @@ class InvitationCodeUpdateTests(InvitationCodeBaseTestCase):
         self.code.refresh_from_db()
         self.assertTrue(self.code.is_active)
 
-    def test_reactivation_with_increased_use_rejected_when_pool_full(self):
+    def test_reactivation_with_increased_use_succeeds_when_pool_full(self):
         other = Project.objects.create(name="Other")
         self.code.max_use = 3
         self.code.save()
         InvitationCode.objects.create(project=other, organization=self.organization, max_use=97)
         self.code.max_use = 10
         self.code.is_active = True
-        with self.assertRaises(ValidationError):
-            self.code.save()
+        self.code.save()
+        self.code.refresh_from_db()
+        self.assertEqual(self.code.max_use, 10)
 
 
 class AppSettingsTests(TestCase):
@@ -178,17 +181,18 @@ class AppSettingsTests(TestCase):
         AppSettings.objects.update(total_tokens=50)
         settings = AppSettings.get_solo()
         self.assertEqual(settings.total_tokens, 50)
-        with self.assertRaises(ValidationError):
-            InvitationCode.objects.create(project=project, organization=self.organization, max_use=1)
+        code = InvitationCode.objects.create(project=project, organization=self.organization, max_use=1)
+        self.assertIsNotNone(code.pk)
+        self.assertEqual(AppSettings.get_solo().tokens_available, -31)
 
-    def test_reduce_total_tokens_below_assigned_via_save_raises_error(self):
+    def test_reduce_total_tokens_below_assigned_via_save_succeeds(self):
         project = Project.objects.create(name="Test")
         InvitationCode.objects.create(project=project, organization=self.organization, max_use=80)
         self.assertEqual(AppSettings.get_solo().tokens_assigned, 80)
         settings = AppSettings.get_solo()
         settings.total_tokens = 50
-        with self.assertRaises(ValidationError):
-            settings.save()
+        settings.save()
+        self.assertEqual(AppSettings.get_solo().total_tokens, 50)
 
 
 from decimal import Decimal as D

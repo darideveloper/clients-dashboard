@@ -1,0 +1,7 @@
+vars {
+  @description('''Base URL of the local dev server, reachable via the portless subdomain started by ./dev.sh. The subdomain derives from the project dir name (clients-feature-ourlives-webhook). Fallback: http://localhost:8000 (only usable when port 8000 is free, since dev.sh auto-increments on conflict).''')
+  base_url: https://clients-feature-ourlives-webhook.localhost
+
+  @description('''Form webhook shared secret. This endpoint validates body.token (not an Authorization header). Paste the value from AppSettings.form_webhook_token and keep it local. Never commit a real secret.''')
+  token: <paste-token-here>
+}

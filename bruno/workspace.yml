@@ -1,0 +1,8 @@
+opencollection: 1.0.0
+info:
+  name: "Clients Dashboard"
+  type: workspace
+
+collections:
+  - name: "Clients Dashboard API"
+    path: "collections/clients"

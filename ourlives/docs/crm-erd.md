@@ -35,9 +35,10 @@ erDiagram
         string stripe_product_id "e.g. prod_xxx nullable, AppSettings.stripe_product_id"
         string stripe_price_id "e.g. price_xxx nullable, AppSettings.stripe_price_id"
         string storage_base_url "e.g. https://storage.example nullable, AppSettings.storage_base_url"
+        string form_webhook_token "e.g. shared secret nullable, AppSettings.form_webhook_token"
         int tokens_assigned "e.g. 20 derived SUM invitation_codes.max_use"
         int tokens_used "e.g. 6 derived SUM invitation_codes.current_use"
-        int tokens_available "e.g. 80 derived total_tokens-assigned"
+        int tokens_available "e.g. 80 derived total_tokens-assigned may go negative"
     }
 
     stripe_events {
@@ -49,6 +50,17 @@ erDiagram
         string presentment_currency "e.g. eur nullable, StripeEvent.presentment_currency"
         int presentment_amount "e.g. 920 nullable, StripeEvent.presentment_amount"
         datetime handled_at "e.g. 2026-09-02T01:45:00Z, StripeEvent.handled_at"
+    }
+
+    form_webhook_events {
+        int id PK "e.g. 1, Django FormWebhookEvent.id (auto)"
+        JSON payload "raw n8n body, FormWebhookEvent.payload"
+        int order_id FK "nullable SET_NULL, FK->orders, FormWebhookEvent.order related_name form_webhook_events"
+        string token "shared secret verbatim admin-only, FormWebhookEvent.token"
+        string event "e.g. create, FormWebhookEvent.event"
+        string execution_mode "e.g. production/test, FormWebhookEvent.execution_mode"
+        string status "rejected/created/updated/error, FormWebhookEvent.status"
+        datetime handled_at "auto_now_add, e.g. 2026-09-25T10:00:00Z"
     }
 
     %% === Implemented — CRM models (migrations 0009-0012) ===
@@ -105,7 +117,7 @@ erDiagram
         string city "e.g. London required, field_enrcy2_city"
         string state "e.g. Greater London nullable blank=True"
         string zip "e.g. SW1A 2AA required, field_enrcy2_zip"
-        int country_id FK "e.g. 826->UK required PROTECT, FK->countries field_enrcy2_country"
+        int country_id FK "e.g. 826->UK nullable PROTECT, FK->countries field_enrcy2_country, null on unmatched label"
         boolean is_primary "e.g. false required default=False"
     }
 
@@ -151,6 +163,7 @@ erDiagram
         string po_number "e.g. PO-2026-8842, field_c8rim2 required"
         int number_of_scans "nullable, e.g. 500, field_mey192"
         decimal cost_per_scan "nullable, e.g. 2.50, field_8id4t"
+        int tokens_used "e.g. 5 default 0, invitation codes created via webhook, Order.tokens_used"
         decimal total_agreed_price "@property: number_of_scans*cost_per_scan, e.g. 1250.00, no column"
         string additional_information "e.g. Need invoice by month end, textarea field_684 nullable"
         string ip_address "e.g. 203.0.113.45 nullable GenericIPAddressField"

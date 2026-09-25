@@ -67,7 +67,7 @@ The system SHALL provide a `Contact` model with `organization` (ForeignKey to `O
 
 ### Requirement: OrganizationAddress model
 
-The system SHALL provide an `OrganizationAddress` model with `organization` (ForeignKey to `Organization`, on_delete=CASCADE, related_name="addresses"), `country` (ForeignKey to `Country`, on_delete=PROTECT, related_name="organization_addresses"), `line1` (CharField max_length=255), `line2` (CharField max_length=255, blank=True), `city` (CharField max_length=100), `state` (CharField max_length=100, blank=True), `zip` (CharField max_length=20), `is_primary` (BooleanField default False), `__str__` returning `"line1, city"`, and `Meta` ordering by `-is_primary, city` with `verbose_name`/`verbose_name_plural` matching existing model style. No database constraint SHALL enforce a single primary per organization in this phase.
+The system SHALL provide an `OrganizationAddress` model with `organization` (ForeignKey to `Organization`, on_delete=CASCADE, related_name="addresses"), `country` (ForeignKey to `Country`, on_delete=PROTECT, related_name="organization_addresses", null=True, blank=True, allowing addresses without a resolved country), `line1` (CharField max_length=255), `line2` (CharField max_length=255, blank=True), `city` (CharField max_length=100), `state` (CharField max_length=100, blank=True), `zip` (CharField max_length=20), `is_primary` (BooleanField default False), `__str__` returning `"line1, city"`, and `Meta` ordering by `-is_primary, city` with `verbose_name`/`verbose_name_plural` matching existing model style. No database constraint SHALL enforce a single primary per organization in this phase.
 
 #### Scenario: Create address
 
@@ -83,6 +83,11 @@ The system SHALL provide an `OrganizationAddress` model with `organization` (For
 
 - **WHEN** a Country with linked addresses is deleted
 - **THEN** the database raises ProtectedError and the Country survives
+
+#### Scenario: Address without a resolved country is allowed
+
+- **WHEN** an OrganizationAddress is created with `country=None` (an unmatched country label during webhook ingestion)
+- **THEN** the address persists with a null country
 
 #### Scenario: Organization delete cascades
 

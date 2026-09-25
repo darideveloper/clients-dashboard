@@ -317,6 +317,12 @@ UNFOLD = {
                         "link": reverse_lazy("admin:ourlives_stripeevent_changelist"),
                         "permission": lambda request: request.user.has_perm("ourlives.view_stripeevent"),
                     },
+                    {
+                        "title": "Form Webhook Events",
+                        "icon": "webhook",
+                        "link": reverse_lazy("admin:ourlives_formwebhookevent_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_formwebhookevent"),
+                    },
                 ],
             },
             {

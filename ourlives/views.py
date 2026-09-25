@@ -1,17 +1,19 @@
 import json
 import logging
+import secrets
 from decimal import Decimal
 from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib import messages as django_messages
+from django.db import transaction
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ourlives.models import AppSettings, StripeEvent, calculate_token_count
+from ourlives.models import AppSettings, FormWebhookEvent, StripeEvent, calculate_token_count
 from ourlives.stripe import create_checkout_session, verify_webhook_signature
 
 logger = logging.getLogger(__name__)
@@ -123,5 +125,84 @@ def webhook(request):
     from ourlives.models import process_ourlives_checkout_completion
 
     process_ourlives_checkout_completion(stripe_event_dict)
+
+    return HttpResponse("OK")
+
+
+@csrf_exempt
+@require_POST
+def form_webhook(request):
+    """Dedicated Ourlens form webhook: POST /webhooks/ourlens/.
+
+    Validates ``body.token`` (shared secret), ingests both ``production`` and
+    ``test``/dev submissions, and records a ``FormWebhookEvent`` audit row.
+    """
+    if request.content_type != "application/json":
+        return HttpResponseBadRequest("Invalid content type")
+
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return HttpResponseBadRequest("Invalid JSON body")
+
+    token = (body.get("token") or "") if isinstance(body, dict) else ""
+    expected = AppSettings.get_solo().form_webhook_token or ""
+    if not expected or not secrets.compare_digest(str(token), str(expected)):
+        FormWebhookEvent.objects.create(
+            payload=body,
+            token=str(token),
+            event=(body.get("event") or "") if isinstance(body, dict) else "",
+            execution_mode=(body.get("executionMode") or "") if isinstance(body, dict) else "",
+            status=FormWebhookEvent.Status.REJECTED,
+        )
+        return HttpResponse("Forbidden", status=403)
+
+    mapping = body.get("mapping") if isinstance(body, dict) else None
+    execution_mode = (body.get("executionMode") or "") if isinstance(body, dict) else ""
+
+    if not mapping:
+        FormWebhookEvent.objects.create(
+            payload=body,
+            token=str(token),
+            event=(body.get("event") or "") if isinstance(body, dict) else "",
+            execution_mode=execution_mode,
+            status=FormWebhookEvent.Status.REJECTED,
+        )
+        return HttpResponse("OK")
+
+    from ourlives.ingestion import RejectedSubmission, ingest
+
+    try:
+        with transaction.atomic():
+            status, order = ingest(mapping)
+            FormWebhookEvent.objects.create(
+                payload=body,
+                order=order,
+                token=str(token),
+                event=(body.get("event") or "") if isinstance(body, dict) else "",
+                execution_mode=execution_mode,
+                status=FormWebhookEvent.Status.CREATED
+                if status == "created"
+                else FormWebhookEvent.Status.UPDATED,
+            )
+    except RejectedSubmission:
+        FormWebhookEvent.objects.create(
+            payload=body,
+            token=str(token),
+            event=(body.get("event") or "") if isinstance(body, dict) else "",
+            execution_mode=execution_mode,
+            status=FormWebhookEvent.Status.REJECTED,
+        )
+        return HttpResponse("OK")
+    except Exception:  # noqa: BLE001 - wrap any ingestion failure into an error audit row
+        logger.exception("Form webhook ingestion failed")
+        FormWebhookEvent.objects.create(
+            payload=body,
+            token=str(token),
+            event=(body.get("event") or "") if isinstance(body, dict) else "",
+            execution_mode=execution_mode,
+            status=FormWebhookEvent.Status.ERROR,
+        )
+        return HttpResponse(status=500)
 
     return HttpResponse("OK")
