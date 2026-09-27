@@ -2184,7 +2184,7 @@ class OrderAdminFilterTests(TestCase):
         ma = admin_site.site._registry[Order]
         self.assertIsInstance(ma, OrderAdmin)
         self.assertIn("total_order_value_display", ma.list_display)
-        self.assertNotIn("total_agreed_price_display", ma.list_display)
+        self.assertIn("total_agreed_price_display", ma.list_display)
         terms = dict(ma.fieldsets)["Terms"]["fields"]
         self.assertIn("total_agreed_price_display", terms)
         self.assertIn("catalog_items_total_display", terms)
