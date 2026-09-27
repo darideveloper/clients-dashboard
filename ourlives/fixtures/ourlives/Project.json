@@ -1,0 +1,18 @@
+[
+  {
+    "model": "ourlives.Project",
+    "pk": 1,
+    "fields": {
+      "name": "ourlens",
+      "description": "Dedicated project for the Ourlens form webhook; all auto-created invitation codes link here"
+    }
+  },
+  {
+    "model": "ourlives.Project",
+    "pk": 2,
+    "fields": {
+      "name": "ourplan",
+      "description": ""
+    }
+  }
+]

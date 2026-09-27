@@ -47,5 +47,12 @@ CLIENT.md
 # data files
 *.csv
 
+# Bruno environments (hold real tokens; templates tracked as .bru.example)
+bruno/collections/*/environments/*.bru
+!bruno/collections/*/environments/*.bru.example
+# the global Bruno collection folder is named "clients", which the bare
+# `clients` rule above would ignore — re-include it here
+!bruno/collections/clients/
+
 # fuse/overlay leftover handles
 .fuse_hidden*

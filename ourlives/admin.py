@@ -21,7 +21,7 @@ from unfold.contrib.filters.admin import (
 )
 
 from project.admin_base import ChangeRequestStashMixin, ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase, UsageBucketFilter, UsageMaxFilter, UsageMinFilter, UsageStatsAdminMixin, paginate_related, plural, related_footer, related_list, related_rows
-from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, UNCATEGORIZED_CURRENCY, _order_currency_code, annotate_code_usage, annotate_order_usage, annotate_organization_usage
+from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, FormWebhookEvent, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, UNCATEGORIZED_CURRENCY, _order_currency_code, annotate_code_usage, annotate_order_usage, annotate_organization_usage
 
 
 def can_purchase(request):
@@ -472,7 +472,7 @@ class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
 @admin.register(Order)
 class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "receipt"
-    list_display = ("order_number", "organization", "rep", "po_number", "total_order_value_display", "submitted_at", "usage_pct_display")
+    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "total_order_value_display", "tokens_used", "submitted_at", "usage_pct_display")
     list_display_links = ("order_number",)
     list_filter = (
         ("organization", AutocompleteSelectFilter),
@@ -505,7 +505,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
             "fields": (
                 "order_number", "organization", "rep", "primary_contact",
                 "invoice_contact", "order_types", "currency", "pilot_currency",
-                "po_number", "number_of_scans", "cost_per_scan",
+                "po_number", "number_of_scans", "cost_per_scan", "tokens_used",
             ),
         }),
         ("Terms", {
@@ -533,6 +533,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
     readonly_fields = (
         "total_agreed_price_display", "catalog_items_total_display", "total_order_value_display",
         "is_pilot_order_display", "submitted_at",
+        "tokens_used",
         "organization_card", "rep_card", "contacts_list", "codes_list",
     )
 
@@ -695,7 +696,7 @@ class AppSettingsAdmin(SingletonModelAdmin, OurlivesExportMixin, ModelAdminUnfol
             "fields": ("stripe_product_id", "stripe_price_id", "sync_stripe_price_link"),
         }),
         ("API Configuration", {
-            "fields": ("storage_base_url",),
+            "fields": ("storage_base_url", "form_webhook_token"),
         }),
         ("Status", {
             "fields": (
@@ -787,6 +788,32 @@ class StripeEventAdmin(OurlivesModelAdminBase):
     search_fields = ("=stripe_event_id", "source", "presentment_currency")
     search_help_text = "Search by event ID, source, or presentment currency."
     readonly_fields = ("stripe_event_id", "source", "token_count", "amount_cents", "presentment_currency", "presentment_amount", "handled_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(FormWebhookEvent)
+class FormWebhookEventAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "webhook"
+    list_display = ("handled_at", "status", "execution_mode", "event", "token", "order", "short_payload")
+    list_filter = ("status", "execution_mode", "event")
+    search_fields = ("=token", "order__order_number", "order__po_number")
+    search_help_text = "Search by token, order number, or PO number."
+    readonly_fields = ("payload", "order", "token", "event", "execution_mode", "status", "handled_at")
+
+    @admin.display(description="Payload")
+    def short_payload(self, obj):
+        if obj.payload is None:
+            return "—"
+        text = str(obj.payload)
+        return text[:80] + ("…" if len(text) > 80 else "")
 
     def has_add_permission(self, request):
         return False

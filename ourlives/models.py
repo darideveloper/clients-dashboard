@@ -187,8 +187,6 @@ class InvitationCode(models.Model):
         return self.code
 
     def clean(self):
-        app_settings = AppSettings.get_solo()
-
         if self.pk is not None:
             old = InvitationCode.objects.get(pk=self.pk)
             if self.max_use < old.current_use:
@@ -199,52 +197,8 @@ class InvitationCode(models.Model):
                     ),
                 })
 
-        qs = InvitationCode.objects.all()
-        if self.pk:
-            qs = qs.exclude(pk=self.pk)
-        assigned = qs.aggregate(total=models.Sum("max_use"))["total"] or 0
-
-        if assigned + self.max_use > app_settings.total_tokens:
-            raise ValidationError({
-                "max_use": (
-                    f"Not enough tokens. Available: "
-                    f"{app_settings.total_tokens - assigned}, "
-                    f"Requested: {self.max_use}"
-                ),
-            })
-
     def save(self, *args, **kwargs):
-        from django.db import transaction
-
         self.full_clean(exclude={"current_use"})
-
-        with transaction.atomic():
-            app_settings = AppSettings.get_solo()
-            app_settings = (
-                AppSettings.objects.select_for_update().get(pk=app_settings.pk)
-            )
-
-            if self.pk is not None:
-                old = InvitationCode.objects.select_for_update().get(pk=self.pk)
-                if self.max_use < old.current_use:
-                    raise ValidationError(
-                        f"max_use ({self.max_use}) cannot be less than "
-                        f"current_use ({old.current_use})"
-                    )
-
-            qs = InvitationCode.objects.all()
-            if self.pk:
-                qs = qs.exclude(pk=self.pk)
-
-            assigned = qs.aggregate(total=models.Sum("max_use"))["total"] or 0
-
-            if assigned + self.max_use > app_settings.total_tokens:
-                raise ValidationError(
-                    f"Not enough tokens. Available: "
-                    f"{app_settings.total_tokens - assigned}, "
-                    f"Requested: {self.max_use}"
-                )
-
         super().save(*args, **kwargs)
 
 
@@ -279,6 +233,11 @@ class AppSettings(SingletonModel):
         blank=True,
         help_text="Base URL for external file storage.",
     )
+    form_webhook_token = models.CharField(
+        blank=True,
+        max_length=255,
+        help_text="Shared secret validated against body.token on POST /webhooks/ourlens/.",
+    )
 
     class Meta:
         verbose_name = "App Settings"
@@ -287,14 +246,6 @@ class AppSettings(SingletonModel):
         return "App Settings"
 
     def clean(self):
-        if self.total_tokens < self.tokens_assigned:
-            raise ValidationError({
-                "total_tokens": (
-                    f"Cannot set total tokens ({self.total_tokens}) "
-                    f"below currently assigned tokens "
-                    f"({self.tokens_assigned})"
-                ),
-            })
         if self.price_per_token is not None and self.price_per_token < Decimal("0"):
             raise ValidationError({
                 "price_per_token": "Price per token cannot be negative.",
@@ -350,6 +301,42 @@ class StripeEvent(models.Model):
 
     def __str__(self):
         return f"{self.source}:{self.stripe_event_id}"
+
+
+class FormWebhookEvent(models.Model):
+    class Status(models.TextChoices):
+        REJECTED = "rejected", "Rejected"
+        CREATED = "created", "Created"
+        UPDATED = "updated", "Updated"
+        ERROR = "error", "Error"
+
+    payload = models.JSONField(
+        help_text="Raw n8n request body as received by the webhook",
+    )
+    order = models.ForeignKey(
+        "Order",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="form_webhook_events",
+    )
+    token = models.CharField(max_length=255, help_text="Shared secret verbatim (admin-only)")
+    event = models.CharField(max_length=50, blank=True)
+    execution_mode = models.CharField(max_length=50, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.REJECTED,
+    )
+    handled_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Form Webhook Event"
+        verbose_name_plural = "Form Webhook Events"
+        ordering = ["-handled_at"]
+
+    def __str__(self):
+        return f"{self.event}:{self.status} @ {self.handled_at:%Y-%m-%d %H:%M}"
 
 
 def calculate_token_count(amount, price_per_token):
@@ -565,6 +552,8 @@ class OrganizationAddress(models.Model):
     )
     country = models.ForeignKey(
         Country,
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="organization_addresses",
     )
@@ -643,6 +632,10 @@ class Order(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+    )
+    tokens_used = models.PositiveIntegerField(
+        default=0,
+        help_text="Invitation codes created via webhook submissions for this order",
     )
     additional_information = models.TextField(blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)

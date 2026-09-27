@@ -1,8 +1,4 @@
-# invitation-code-validation Specification
-
-## Purpose
-Django admin validation for invitation codes: inline business-rule errors for current_use <= max_use, and total token pool may go negative (over-assignment is allowed; availability is not gated).
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Admin form shows inline validation errors for invitation codes
 The system SHALL display business rule violations as inline form-level error messages in the Django admin, instead of crashing to a debug error page. Token pool exhaustion is no longer a validation error: codes may be created even when they over-assign the pool.
@@ -32,3 +28,9 @@ The system SHALL allow reducing `AppSettings.total_tokens` below the sum of all 
 #### Scenario: Reduce total_tokens below assigned
 - **WHEN** admin user sets `total_tokens` to a value less than the current `tokens_assigned`
 - **THEN** the change is accepted and `tokens_available` becomes negative
+
+## REMOVED Requirements
+
+### Requirement: Race condition safety net for concurrent admin operations
+**Reason**: The token pool over-assignment guard it protected no longer exists — order-creation and code creation are decoupled from the pool (negative availability is the intended model).
+**Migration**: No migration path needed; concurrent admin saves of invitation codes are unaffected (they simply no longer coordinate on pool capacity).

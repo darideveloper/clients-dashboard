@@ -1,0 +1,116 @@
+meta {
+  name: POST form
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/webhooks/ourlens/
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "token": "{{token}}",
+    "event": "create",
+    "mapping": {
+      "order-number": "OL - 95",
+      "is-this-a-pilot-order": "Yes",
+      "is-this-an-upgrade-from-a-pilot": "No",
+      "is-this-an-order-following-a-referral": "No",
+      "name-of-the-organsation-who-is-referring": "",
+      "you-have-selected-yes-to-an-upgrade-from-a-pilot": "",
+      "reps-name": "John Doe",
+      "reps-email": "john@example.com",
+      "company-address-purchasing-ourlens-scans": "123 Main St, Suite 2, Springfield, IL, 62704, Sweden",
+      "primary-contact": "Jane Smith",
+      "primary-contact-email": "jane@example.com",
+      "primary-contact-phone": "5551234",
+      "invoice-contact": "Jack Smith",
+      "invoice-email": "jack@example.com",
+      "invoice-contact-phone": "5555678",
+      "pilot-currency": "CAD",
+      "currency": "",
+      "po-number": "PO-1",
+      "number-of-scans": "",
+      "cost-per-scan": "",
+      "total-agreed-price": "",
+      "product-us": "",
+      "quantity-us": "",
+      "us-dollars": "",
+      "product-canada": "Enterprise Pilot",
+      "quantity-canada": "1",
+      "canadian-dollars": "17995",
+      "product-uk": "",
+      "quantity-uk": "",
+      "gbp": "",
+      "product-south-africa": "",
+      "quantity-south-africa": "",
+      "zar": "",
+      "i-would-like-additional-codes": "No",
+      "how-many-additional-codes-do-you-require": "",
+      "code-1": "",
+      "code-2": "",
+      "code-3": "",
+      "code-4": "",
+      "code-5": "",
+      "code-6": "",
+      "code-7": "",
+      "code-8": "",
+      "code-9": "",
+      "code-10": "",
+      "code-11": "",
+      "code-12": "",
+      "code-13": "",
+      "code-14": "",
+      "code-16": "",
+      "code-17": "",
+      "code-18": "",
+      "code-19": "",
+      "code-20": "",
+      "please-add-an-additional-information-relating-to-this-order": "<p>Sample pilot order, please ignore.</p>"
+    },
+    "webhookUrl": "https://n8n.example.com/webhook/abc",
+    "executionMode": "production"
+  }
+}
+
+docs {
+  # POST /webhooks/ourlens/ — Ingest an Ourlens order submission
+
+  Ingests the n8n `mapping` payload into the CRM: creates/reconciles the
+  Order, Organization, Rep, Contacts, Address, pilot OrderItem(s) and
+  InvitationCode(s), and writes a `FormWebhookEvent` audit row. The endpoint
+  itself returns an empty 200 body on success.
+
+  ## Auth (deviation from the vendored DRF guide)
+
+  This endpoint validates `body.token` inside the JSON body — NOT an
+  `Authorization: Token` header. So this request uses `auth: none` and the
+  token is supplied in the body as `"token": "{{token}}"`, read from the active
+  environment. See `docs/django-bruno.local.md`.
+
+  ## Status codes
+
+  - `200 OK` — ingested (created or updated); empty response body. Also returned
+    with status `rejected` when `mapping` is empty (n8n does not retry).
+  - `400 Bad Request` — wrong content-type or unparsable JSON
+  - `403 Forbidden` — missing or wrong `token`
+  - `500 Internal Server Error` — ingestion failed (audit row status `error`)
+
+  ## Request
+
+  ```json
+  {
+    "token": "<secret>",
+    "event": "create",
+    "mapping": { "...55 descriptive keys..." },
+    "executionMode": "production"
+  }
+  ```
+
+  `executionMode` may be `production` or `test`; both are processed. `mapping`
+  carries the order, rep, address, contacts, pilot product block and invitation
+  codes (see `ourlives/docs/form-webhook.md`).
+}

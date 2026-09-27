@@ -11,6 +11,7 @@ urlpatterns = [
     path("", RedirectView.as_view(url="/admin/"), name="home-redirect-admin"),
     path("api/", include(router.urls)),
     path("stripe/", include("ourlives.urls")),
+    path("webhooks/", include("ourlives.webhook_urls")),
 ]
 
 if settings.DEBUG:
