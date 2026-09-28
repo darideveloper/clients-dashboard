@@ -67,21 +67,22 @@ class SampleReplayTests(TestCase):
     def test_order_89_code_gap_preserved(self):
         self._post(self._load("OL-89"))
         order = self._order("OL-89")
-        seqs = list(order.invitation_codes.order_by("sequence").values_list("sequence", flat=True))
+        seqs = list(order.requested_codes.order_by("sequence").values_list("sequence", flat=True))
         self.assertEqual(seqs, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20])
-        self.assertEqual(order.tokens_used, 19)
-        for code in order.invitation_codes.select_related("project", "code_type"):
-            self.assertEqual(code.max_use, 1)
-            self.assertEqual(code.current_use, 0)
-            self.assertTrue(code.is_active)
-            self.assertEqual(code.project.name, "ourlens")
+        self.assertEqual(order.tokens_used, 0)
+        self.assertEqual(order.invitation_codes.count(), 0)
+        self.assertTrue(order.requested_codes_wanted)
+        self.assertEqual(order.requested_code_type.code, "up_to_20")
+        for code in order.requested_codes.select_related("code_type"):
             self.assertEqual(code.code_type.code, "up_to_20")
+            self.assertEqual(code.order_id, order.pk)
 
     def test_order_93_five_up_to5_codes(self):
         self._post(self._load("OL-93"))
         order = self._order("OL-93")
-        self.assertEqual(order.invitation_codes.count(), 5)
-        self.assertTrue(all(c.code_type.code == "up_to_5" for c in order.invitation_codes.all()))
+        self.assertEqual(order.requested_codes.count(), 5)
+        self.assertEqual(order.invitation_codes.count(), 0)
+        self.assertTrue(all(c.code_type.code == "up_to_5" for c in order.requested_codes.all()))
 
     def test_pilot_items_by_region(self):
         expectations = [
@@ -116,7 +117,7 @@ class SampleReplayTests(TestCase):
     def test_repost_is_idempotent(self):
         self._post(self._load("OL-89"))
         order = self._order("OL-89")
-        before = (order.invitation_codes.count(), order.tokens_used)
+        before = (order.requested_codes.count(), order.tokens_used)
         resp = self._post(self._load("OL-89"))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(
@@ -124,7 +125,7 @@ class SampleReplayTests(TestCase):
             "repost must not duplicate order",
         )
         order.refresh_from_db()
-        self.assertEqual((order.invitation_codes.count(), order.tokens_used), before)
+        self.assertEqual((order.requested_codes.count(), order.tokens_used), before)
 
     def test_two_orders_share_same_company(self):
         self._post(self._load("OL-88"))
@@ -142,10 +143,25 @@ class SampleReplayTests(TestCase):
         event = FormWebhookEvent.objects.latest("id")
         self.assertEqual(event.status, "rejected")
 
-    def test_duplicate_code_values_not_partial(self):
-        # 5 identical code values -> exactly 1 deterministic code, logged, no error
-        from ourlives.models import InvitationCode
+    def test_repost_replaces_requested_codes(self):
+        self._post(self._load("OL-89"))
+        order = self._order("OL-89")
+        self.assertEqual(order.requested_codes.count(), 19)
+        body = self._load("OL-89")
+        for n in range(1, 21):
+            body["mapping"][f"code-{n}"] = ""
+        body["mapping"]["code-2"] = "KEEP-2"
+        body["mapping"]["code-7"] = "KEEP-7"
+        resp = self._post(body)
+        self.assertEqual(resp.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(
+            list(order.requested_codes.order_by("sequence").values_list("value", flat=True)),
+            ["KEEP-2", "KEEP-7"],
+        )
 
+    def test_duplicate_code_values_stored_per_slot(self):
+        # 3 identical code values -> 3 requested rows (one per slot), no codes
         body = self._load("OL-86")
         body["mapping"]["code-1"] = "DUP-1"
         body["mapping"]["code-2"] = "DUP-1"
@@ -153,6 +169,10 @@ class SampleReplayTests(TestCase):
         resp = self._post(body)
         self.assertEqual(resp.status_code, 200)
         order = Order.objects.get(order_number=_number_of("OL-86"))
-        self.assertEqual(order.invitation_codes.count(), 1)
-        self.assertEqual(order.tokens_used, 1)
-        self.assertEqual(order.invitation_codes.get().code, "DUP-1")
+        self.assertEqual(order.requested_codes.count(), 3)
+        self.assertEqual(
+            list(order.requested_codes.order_by("sequence").values_list("sequence", flat=True)),
+            [1, 2, 3],
+        )
+        self.assertEqual(order.tokens_used, 0)
+        self.assertEqual(order.invitation_codes.count(), 0)

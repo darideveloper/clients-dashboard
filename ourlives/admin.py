@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.core.validators import EMPTY_VALUES
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.db.models.functions import Coalesce
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
@@ -21,7 +21,7 @@ from unfold.contrib.filters.admin import (
 )
 
 from project.admin_base import ChangeRequestStashMixin, ModelAdminUnfoldBase, OrderSummaryAdminMixin, OurlivesExportMixin, OurlivesModelAdminBase, UsageBucketFilter, UsageMaxFilter, UsageMinFilter, UsageStatsAdminMixin, paginate_related, plural, related_footer, related_list, related_rows
-from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, FormWebhookEvent, InvitationCode, Order, OrderItem, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, UNCATEGORIZED_CURRENCY, _order_currency_code, annotate_code_usage, annotate_order_usage, annotate_organization_usage
+from ourlives.models import AppSettings, CodeType, Contact, ContactType, Country, Currency, FormWebhookEvent, InvitationCode, Order, OrderItem, OrderRequestedCode, OrderType, Organization, OrganizationAddress, Product, Project, Rep, StripeEvent, UNCATEGORIZED_CURRENCY, _order_currency_code, annotate_code_usage, annotate_order_usage, annotate_organization_usage
 
 
 def can_purchase(request):
@@ -255,6 +255,18 @@ class InvitationCodeAdmin(UsageStatsAdminMixin, OurlivesModelAdminBase):
             self.message_user(request, str(e), messages.ERROR)
 
 
+@admin.register(OrderRequestedCode)
+class OrderRequestedCodeAdmin(OurlivesModelAdminBase):
+    sidebar_icon = "tag"
+    list_display = ("value", "order", "sequence", "code_type")
+    list_display_links = ("value",)
+    list_filter = ("code_type", "order")
+    search_fields = ("^value", "order__order_number")
+    search_help_text = "Search by requested value or order number."
+    list_per_page = 50
+    autocomplete_fields = ("order",)
+
+
 @admin.register(Country)
 class CountryAdmin(OurlivesModelAdminBase):
     sidebar_icon = "globe"
@@ -418,6 +430,18 @@ class OrganizationAddressAdmin(OurlivesModelAdminBase):
     list_editable = ("is_primary",)
 
 
+class RequestedCodeInline(UnfoldTabularInline):
+    model = OrderRequestedCode
+    fields = ("sequence", "value", "code_type")
+    readonly_fields = ("sequence", "value", "code_type")
+    extra = 0
+    can_delete = False
+    autocomplete_fields = ("code_type",)
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 class OrderItemInline(UnfoldTabularInline):
     model = OrderItem
     extra = 0
@@ -472,7 +496,7 @@ class ActiveCurrencyDropdownFilter(RelatedDropdownFilter):
 @admin.register(Order)
 class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdminBase):
     sidebar_icon = "receipt"
-    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "total_order_value_display", "tokens_used", "submitted_at", "usage_pct_display")
+    list_display = ("order_number", "organization", "rep", "po_number", "total_agreed_price_display", "total_order_value_display", "live_codes_count_display", "submitted_at", "usage_pct_display")
     list_display_links = ("order_number",)
     list_filter = (
         ("organization", AutocompleteSelectFilter),
@@ -483,6 +507,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
         ("submitted_at", RangeDateTimeFilter),
         ("referral_organisation", FieldTextFilter),
         "order_types",
+        "requested_code_type",
         "hcaptcha_verified",
         "is_upgrade_from_pilot",
         "is_referral_order",
@@ -499,7 +524,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
     filter_horizontal = ("order_types",)
     date_hierarchy = "submitted_at"
     list_select_related = ("organization", "rep", "primary_contact", "invoice_contact", "currency", "pilot_currency")
-    inlines = (OrderItemInline,)
+    inlines = (OrderItemInline, RequestedCodeInline)
     fieldsets = (
         ("Order", {
             "fields": (
@@ -511,6 +536,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
         ("Terms", {
             "fields": (
                 "is_upgrade_from_pilot", "is_referral_order", "referral_organisation",
+                "requested_codes_wanted", "requested_codes_bundle", "requested_code_type",
                 "hcaptcha_verified", "is_pilot_order_display",
                 "total_agreed_price_display", "catalog_items_total_display", "total_order_value_display", "submitted_at",
             ),
@@ -534,6 +560,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
         "total_agreed_price_display", "catalog_items_total_display", "total_order_value_display",
         "is_pilot_order_display", "submitted_at",
         "tokens_used",
+        "requested_codes_wanted", "requested_codes_bundle", "requested_code_type",
         "organization_card", "rep_card", "contacts_list", "codes_list",
     )
 
@@ -546,7 +573,7 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
             )
             .prefetch_related("order_types")
             .prefetch_related("items__product__currency")
-        )
+        ).annotate(_live_codes_count=Count("invitation_codes", distinct=True))
 
     @admin.display(description="Agreed scans total")
     def total_agreed_price_display(self, obj):
@@ -571,6 +598,13 @@ class OrderAdmin(ChangeRequestStashMixin, UsageStatsAdminMixin, OurlivesModelAdm
     @admin.display(description="Pilot", boolean=True)
     def is_pilot_order_display(self, obj):
         return obj.is_pilot_order
+
+    @admin.display(description="Codes", ordering="_live_codes_count")
+    def live_codes_count_display(self, obj):
+        if obj is None or obj.pk is None:
+            return "—"
+        count = getattr(obj, "_live_codes_count", None)
+        return count if count is not None else "—"
 
     @admin.display(description="Company")
     def organization_card(self, obj):

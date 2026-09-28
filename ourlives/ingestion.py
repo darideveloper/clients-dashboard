@@ -1,14 +1,15 @@
 """Ourlens form webhook ingestion service.
 
 Turns an n8n `mapping` payload (descriptive keys, OL-86+) into CRM rows:
-Order / Organization / Rep / Contacts / Address / OrderItem(s) / InvitationCode(s).
+Order / Organization / Rep / Contacts / Address / OrderItem(s) /
+OrderRequestedCode(s).
 
-Design decision summary (see openspec/changes/form-webhook-ingestion):
-- `ourlens` is ALWAYS the code project for this webhook.
-- Codes are auto-created per non-empty `code-N` (independent of the toggle);
-  `code_type` is null when no bundle label is present.
-- Reconcile is additive: existing codes/items never deleted; availability may
-  go negative.
+Design decision summary (see openspec/changes/requested-codes-no-generation):
+- Requested codes are stored verbatim per non-empty `code-N` (one row per
+  slot, within-order duplicates kept); `code_type` is null when no bundle
+  label is present. No live `InvitationCode` is ever created here.
+- Reconcile replaces: existing requested codes are deleted and re-inserted
+  from the latest mapping; availability is never touched.
 """
 
 import html
@@ -17,27 +18,25 @@ import re
 
 from decimal import Decimal
 
+from django.db import transaction
+
 from ourlives.models import (
-    AppSettings,
     CodeType,
     Contact,
     ContactType,
     Country,
     Currency,
-    InvitationCode,
     Order,
     OrderItem,
+    OrderRequestedCode,
     OrderType,
     Organization,
     OrganizationAddress,
     Product,
-    Project,
     Rep,
 )
 
 logger = logging.getLogger(__name__)
-
-OURLENS_PROJECT_NAME = "ourlens"
 
 
 class RejectedSubmission(Exception):
@@ -163,12 +162,6 @@ def resolve_product(region, tier):
     if not region or not tier:
         return None
     return Product.objects.filter(name=f"{region} {tier} Pilot").first()
-
-
-def ourlens_project():
-    # ponytail: get_or_create keeps fresh/test DBs working while the fixture
-    # guarantees the real row; idempotent, never creates a duplicate.
-    return Project.objects.get_or_create(name=OURLENS_PROJECT_NAME)[0]
 
 
 def _val(mapping, key):
@@ -301,52 +294,24 @@ def _build_pilot_items(order, mapping):
     return True
 
 
-def _create_codes(order, org, mapping, code_type):
-    """Auto-create InvitationCodes from non-empty code-N; additive only.
+def _store_requested_codes(order, mapping, code_type):
+    """Replace the order's requested codes with the current mapping.
 
-    Non-empty values are de-duplicated deterministically (within the submission
-    and against the order's existing codes), so a repeated literal never
-    triggers a partial/failed create and never invents extra tokens. Duplicate
-    skips are logged rather than raised.
-
-    Returns the number of codes created on this call (accumulates on orders).
+    One row per non-empty code-N (within-order duplicates kept, one row per
+    slot); sequence = slot N so gaps are preserved.
     """
-    project = ourlens_project()
-    existing = (
-        set(order.invitation_codes.values_list("code", flat=True)) if order.pk else set()
-    )
-    seen = set()
-    created = 0
-    for slot in range(1, 21):
-        value = _val(mapping, f"code-{slot}")
-        if not value:
-            continue
-        if value in existing or value in seen:
-            if value not in existing:
-                logger.warning(
-                    "Duplicate code value %r in submission skipped on order %s",
-                    value, order.order_number,
-                )
-            continue
-        try:
-            InvitationCode.objects.create(
-                project=project,
-                organization=org,
+    with transaction.atomic():
+        order.requested_codes.all().delete()
+        OrderRequestedCode.objects.bulk_create([
+            OrderRequestedCode(
                 order=order,
-                code=value,
-                code_type=code_type,
                 sequence=slot,
-                is_active=True,
-                max_use=1,
-                current_use=0,
+                value=value,
+                code_type=code_type,
             )
-        except Exception as exc:  # noqa: BLE001 - tolerant (e.g. global code collision)
-            logger.warning("Skipping code %s on %s: %s", value, order.order_number, exc)
-            continue
-        existing.add(value)
-        seen.add(value)
-        created += 1
-    return created
+            for slot in range(1, 21)
+            if (value := _val(mapping, f"code-{slot}"))
+        ])
 
 
 def ingest(mapping):
@@ -386,6 +351,9 @@ def ingest(mapping):
 
     is_pilot = _yes(mapping, "is-this-a-pilot-order")
     order_type = _resolve_order_type("pilot" if is_pilot else "standard")
+    code_type = resolve_code_type(
+        _val(mapping, "how-many-additional-codes-do-you-require")
+    )
 
     order_fields = {
         "organization": org,
@@ -396,6 +364,9 @@ def ingest(mapping):
         "is_upgrade_from_pilot": _yes(mapping, "is-this-an-upgrade-from-a-pilot"),
         "is_referral_order": _yes(mapping, "is-this-an-order-following-a-referral"),
         "referral_organisation": _val(mapping, "name-of-the-organsation-who-is-referring") or None,
+        "requested_codes_wanted": _yes(mapping, "i-would-like-additional-codes"),
+        "requested_codes_bundle": _val(mapping, "how-many-additional-codes-do-you-require"),
+        "requested_code_type": code_type,
         "additional_information": strip_html(
             _val(mapping, "please-add-an-additional-information-relating-to-this-order")
         ),
@@ -419,7 +390,7 @@ def ingest(mapping):
         )
 
     if order is None:
-        order = Order.objects.create(order_number=raw_order, tokens_used=0, **order_fields)
+        order = Order.objects.create(order_number=raw_order, **order_fields)
     else:
         for field, value in order_fields.items():
             setattr(order, field, value)
@@ -434,13 +405,7 @@ def ingest(mapping):
     if is_pilot:
         pilot_resolved = _build_pilot_items(order, mapping)
 
-    code_type = resolve_code_type(
-        _val(mapping, "how-many-additional-codes-do-you-require")
-    )
-    created_codes = _create_codes(order, org, mapping, code_type)
-    if created_codes:
-        order.tokens_used = (order.tokens_used or 0) + created_codes
-        order.save(update_fields=("tokens_used",))
+    _store_requested_codes(order, mapping, code_type)
 
     country_label = parsed_address["country"]
     if country_label and resolve_country(country_label) is None:

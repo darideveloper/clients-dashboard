@@ -294,6 +294,12 @@ UNFOLD = {
                         "permission": lambda request: request.user.has_perm("ourlives.view_invitationcode"),
                     },
                     {
+                        "title": "Requested Codes",
+                        "icon": "tag",
+                        "link": reverse_lazy("admin:ourlives_orderrequestedcode_changelist"),
+                        "permission": lambda request: request.user.has_perm("ourlives.view_orderrequestedcode"),
+                    },
+                    {
                         "title": "Orders",
                         "icon": "receipt",
                         "link": reverse_lazy("admin:ourlives_order_changelist"),

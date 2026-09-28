@@ -1767,6 +1767,7 @@ class CrmAdminRegistrationTests(TestCase):
                 ("submitted_at", RangeDateTimeFilter),
                 ("referral_organisation", FieldTextFilter),
                 "order_types",
+                "requested_code_type",
                 "hcaptcha_verified",
                 "is_upgrade_from_pilot",
                 "is_referral_order",
@@ -1791,7 +1792,7 @@ class CrmAdminRegistrationTests(TestCase):
         self.assertEqual(ma.date_hierarchy, "submitted_at")
         self.assertIn("total_agreed_price_display", ma.readonly_fields)
         self.assertIn("is_pilot_order_display", ma.readonly_fields)
-        self.assertEqual(len(ma.inlines), 1)
+        self.assertEqual(len(ma.inlines), 2)
 
     def test_inline_classes_are_unfold(self):
         from unfold.admin import StackedInline as UnfoldStackedInline
@@ -2249,8 +2250,9 @@ class ChildInlineCoexistenceTests(TestCase):
             fs.formset.prefix: fs
             for fs in response.context["inline_admin_formsets"]
         }
-        self.assertEqual(set(formsets), {"items"})
+        self.assertEqual(set(formsets), {"items", "requested_codes"})
         self.assertEqual(formsets["items"].formset.total_form_count(), 1)
+        self.assertEqual(formsets["requested_codes"].formset.total_form_count(), 0)
 
 
 @override_settings(STORAGES={

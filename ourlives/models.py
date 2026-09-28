@@ -635,7 +635,24 @@ class Order(models.Model):
     )
     tokens_used = models.PositiveIntegerField(
         default=0,
-        help_text="Invitation codes created via webhook submissions for this order",
+        help_text="Legacy webhook counter (frozen, no longer written); live code count comes from linked invitation codes",
+    )
+    requested_codes_wanted = models.BooleanField(
+        default=False,
+        help_text="Form toggle: whether additional codes were requested",
+    )
+    requested_codes_bundle = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Verbatim bundle label from the form (e.g. 'Up to 5 Additional Codes')",
+    )
+    requested_code_type = models.ForeignKey(
+        "CodeType",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="requested_orders",
     )
     additional_information = models.TextField(blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
@@ -707,6 +724,35 @@ class OrderItem(models.Model):
     @property
     def line_total(self):
         return self.quantity * self.unit_price
+
+
+class OrderRequestedCode(models.Model):
+    """Verbatim form-requested code slot; never a live code (no pool impact)."""
+
+    order = models.ForeignKey(
+        Order,
+        on_delete=models.CASCADE,
+        related_name="requested_codes",
+    )
+    sequence = models.PositiveIntegerField(
+        help_text="Form slot number (code-N → N); gaps kept, e.g. missing 15",
+    )
+    value = models.CharField(max_length=50)
+    code_type = models.ForeignKey(
+        "CodeType",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="requested_codes",
+    )
+
+    class Meta:
+        verbose_name = "Requested Code"
+        verbose_name_plural = "Requested Codes"
+        ordering = ["order", "sequence"]
+
+    def __str__(self):
+        return f"{self.value} (#{self.sequence} on {self.order})"
 
 
 def usage_pct_expression(used_expr, max_expr):

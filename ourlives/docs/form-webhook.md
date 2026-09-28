@@ -3,7 +3,8 @@
 Sales orders captured on the public WordPress site ("Ourlens US Order Form V2",
 Formidable form_id 20) are forwarded by n8n to this endpoint, which unpacks the
 `mapping` and auto-populates the CRM (Order / Organization / Rep / Contacts /
-Address / OrderItem(s) / InvitationCode(s)).
+Address / OrderItem(s) / OrderRequestedCode(s)). No live `InvitationCode` is
+ever created here — requested codes are stored verbatim for staff to review.
 
 ## Endpoint
 
@@ -46,27 +47,33 @@ and test/dev submissions are processed; the value is recorded on the audit row.
 | Pilot product | region-block by pilot currency: `product-<region>`, `quantity-<region>`, `<region-price-field>` (us/Canada/uk/south-africa) |
 | Invitation codes | `code-1`..`code-20` (non-empty → one code; see below), `i-would-like-additional-codes`, `how-many-additional-codes-do-you-require` |
 
-## Invitation codes
+## Requested codes
 
-One `InvitationCode` is created per non-empty `code-N`, regardless of the
-"additional codes" toggle (the values are the source of truth). Non-empty code
-values are de-duplicated deterministically (against the order's existing codes
-and within the submission), so a repeated literal yields one code and the
-skips are logged. Each code gets
-`max_use=1`, `current_use=0`, `is_active=True`, `sequence = slot N` (gaps kept,
-e.g. OL-89 skips `code-15`), `project = ourlens` (always), the resolved org and
-order. `code_type` comes from `how-many-additional-codes-do-you-require`
-(`Up to 5 Additional Codes` → `up_to_5`, `Up to 20 Additional Codes` →
-`up_to_20`); null when the bundle is blank. `Order.tokens_used` accumulates the
-created count. Creation never fails for want of pool (availability may go
-negative).
+One `OrderRequestedCode` is stored per non-empty `code-N`, regardless of the
+"additional codes" toggle (the values are the source of truth). Within-order
+duplicates are kept (one row per slot, e.g. OL-88's five identical values);
+`sequence = slot N` (gaps kept, e.g. OL-89 skips `code-15`); `value` has no
+uniqueness constraint. The bundle toggle and label are stored on the order
+(`requested_codes_wanted`, `requested_codes_bundle`, `requested_code_type`
+from `how-many-additional-codes-do-you-require`: `Up to 5 Additional Codes` →
+`up_to_5`, `Up to 20 Additional Codes` → `up_to_20`; null when blank), and each
+code row carries the same `code_type`. `Order.tokens_used` is frozen legacy
+and is never incremented here. No pool impact: availability never changes.
+
+## Manually creating the real codes
+
+Staff create live `InvitationCode`s by hand in admin: `project = ourlens`,
+`organization` = the order's organization, link `order`, `code_type` = the
+order's bundle, `max_use = 1`. Generate fresh code values — do not retype
+placeholder literals verbatim (e.g. repeated `P03TST-`), as `InvitationCode.code`
+is globally unique and the second identical value will fail.
 
 ## Duplicates / reconcile
 
 `order-number` is stored raw but matched normalized (`OL - 95` ≡ `OL-95`). A
 matching existing order is reconciled: core fields refreshed, pilot items
-replaced, and **only missing codes added** — existing codes are never deleted,
-so real `current_use` history is preserved.
+replaced, and requested codes **replaced** with the latest mapping (delete +
+re-insert, so the stored set always mirrors the last submission).
 
 ## Responses
 

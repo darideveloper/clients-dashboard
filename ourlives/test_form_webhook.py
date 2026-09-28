@@ -275,11 +275,11 @@ class EndpointTests(WebhookFixtures):
         self.assertEqual(FormWebhookEvent.objects.filter(status="updated").count(), 1)
 
 
-class InvitationCodeTests(WebhookFixtures):
+class RequestedCodeTests(WebhookFixtures):
     def make(self, mapping):
         return ingest(mapping)
 
-    def test_auto_creation_with_gap(self):
+    def test_stored_with_gap(self):
         mapping = self.mapping({
             "i-would-like-additional-codes": "Yes",
             "how-many-additional-codes-do-you-require": "Up to 20 Additional Codes",
@@ -289,37 +289,60 @@ class InvitationCodeTests(WebhookFixtures):
         })
         status, order = self.make(mapping)
         self.assertEqual(status, "created")
-        codes = order.invitation_codes.order_by("sequence")
+        codes = order.requested_codes.order_by("sequence")
         self.assertEqual(list(codes.values_list("sequence", flat=True)), [14, 16, 17])
+        self.assertEqual(
+            list(codes.values_list("value", flat=True)),
+            ["P04-015", "P04-016", "P04-017"],
+        )
         for code in codes:
-            self.assertEqual(code.max_use, 1)
-            self.assertEqual(code.current_use, 0)
-            self.assertEqual(code.is_active, True)
-            self.assertEqual(code.project.name, "ourlens")
-        self.assertEqual(order.tokens_used, 3)
+            self.assertEqual(code.order_id, order.pk)
+            self.assertEqual(code.code_type.code, "up_to_20")
+        self.assertTrue(order.requested_codes_wanted)
+        self.assertEqual(order.requested_code_type.code, "up_to_20")
+        self.assertEqual(order.tokens_used, 0)
+        self.assertEqual(order.invitation_codes.count(), 0)
 
     def test_code_type_null_when_no_bundle(self):
         mapping = self.mapping({"code-1": "ABC-1"})
         status, order = self.make(mapping)
-        self.assertEqual(order.invitation_codes.get().code_type, None)
+        self.assertEqual(order.requested_codes.get().code_type, None)
+        self.assertFalse(order.requested_codes_wanted)
+        self.assertIsNone(order.requested_code_type)
 
-    def test_add_only_reconcile_preserves_codes(self):
+    def test_replace_on_reconcile(self):
         status, order = self.make(self.mapping({"code-1": "K1"}))
-        first = order.invitation_codes.get()
+        self.assertEqual(order.requested_codes.count(), 1)
         status, order = self.make(
             self.mapping({"order-number": "OL-95", "code-1": "K1", "code-2": "K2"})
         )
         order.refresh_from_db()
-        self.assertEqual(order.invitation_codes.count(), 2)
-        self.assertEqual(order.invitation_codes.get(code="K1").pk, first.pk)
-        self.assertEqual(order.tokens_used, 2)
+        self.assertEqual(status, "updated")
+        self.assertEqual(
+            list(order.requested_codes.order_by("sequence").values_list("value", flat=True)),
+            ["K1", "K2"],
+        )
+        status, order = self.make(
+            self.mapping({"order-number": "OL-95", "code-2": "K2"})
+        )
+        order.refresh_from_db()
+        self.assertEqual(
+            list(order.requested_codes.values_list("value", flat=True)), ["K2"]
+        )
+        self.assertEqual(order.tokens_used, 0)
 
-    def test_creation_succeeds_when_pool_exhausted(self):
+    def test_within_order_duplicates_kept(self):
+        mapping = self.mapping({"code-1": "DUP", "code-2": "DUP"})
+        status, order = self.make(mapping)
+        self.assertEqual(order.requested_codes.count(), 2)
+
+    def test_storage_succeeds_when_pool_exhausted(self):
         AppSettings.objects.filter(pk=AppSettings.get_solo().pk).update(total_tokens=0)
         mapping = self.mapping({"code-1": "X1", "code-2": "X2"})
         status, order = self.make(mapping)
         self.assertEqual(status, "created")
-        self.assertEqual(order.invitation_codes.count(), 2)
+        self.assertEqual(order.requested_codes.count(), 2)
+        self.assertEqual(order.invitation_codes.count(), 0)
 
 
 class PilotOrderTests(WebhookFixtures):
@@ -416,6 +439,38 @@ class AdminTests(WebhookFixtures):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, ">Tokens used</label>")
+
+    def test_order_live_codes_count_display(self):
+        from django.test import RequestFactory
+
+        from ourlives.admin import OrderAdmin
+
+        status, order = ingest(self.mapping_with_codes())
+        admin_obj = OrderAdmin(Order, None)
+        request = RequestFactory().get("/admin/ourlives/order/")
+        request.user = self.user
+        self.assertEqual(order.requested_codes.count(), 2)
+        self.assertEqual(admin_obj.get_queryset(request).get(pk=order.pk)._live_codes_count, 0)
+        annotated = admin_obj.get_queryset(request).get(pk=order.pk)
+        self.assertEqual(admin_obj.live_codes_count_display(annotated), 0)
+        InvitationCode.objects.create(
+            project=self.project,
+            organization=order.organization,
+            order=order,
+            code="LIVE-1",
+            max_use=1,
+        )
+        InvitationCode.objects.create(
+            project=self.project,
+            organization=order.organization,
+            order=order,
+            code="LIVE-2",
+            max_use=1,
+        )
+        annotated = admin_obj.get_queryset(request).get(pk=order.pk)
+        self.assertEqual(admin_obj.live_codes_count_display(annotated), 2)
+        self.assertEqual(admin_obj.live_codes_count_display(None), "—")
+        self.assertEqual(admin_obj.live_codes_count_display(Order()), "—")
 
     def mapping_with_codes(self):
         return self.mapping({"code-1": "T-1", "code-2": "T-2"})

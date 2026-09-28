@@ -60,7 +60,7 @@ The system SHALL link `Order` to `OrderType` via `order_types` (ManyToManyField 
 
 ### Requirement: Order currencies and commercial fields
 
-The system SHALL provide on `Order`: `currency` (ForeignKey to `Currency`, on_delete=SET_NULL, null=True, blank=True, related_name="orders"), `pilot_currency` (ForeignKey to `Currency`, on_delete=SET_NULL, null=True, blank=True, related_name="pilot_orders"), `is_upgrade_from_pilot` (BooleanField default False), `is_referral_order` (BooleanField default False), `referral_organisation` (CharField max_length=255, null=True, blank=True), `po_number` (CharField max_length=100), `number_of_scans` (PositiveIntegerField null=True, blank=True), `cost_per_scan` (DecimalField max_digits=10, decimal_places=2, null=True, blank=True), `additional_information` (TextField blank=True), `ip_address` (GenericIPAddressField null=True, blank=True), `form_entry_key` (CharField max_length=100, null=True, blank=True), `submitted_at` (DateTimeField auto_now_add=True), `hcaptcha_verified` (BooleanField default False), `tokens_used` (PositiveIntegerField default 0, tracking invitation codes created via webhook submissions), and `total_agreed_price` as a `@property` returning `number_of_scans * cost_per_scan`, or `Decimal("0")` when either is None. No `total_agreed_price` database column SHALL exist.
+The system SHALL provide on `Order`: `currency` (ForeignKey to `Currency`, on_delete=SET_NULL, null=True, blank=True, related_name="orders"), `pilot_currency` (ForeignKey to `Currency`, on_delete=SET_NULL, null=True, blank=True, related_name="pilot_orders"), `is_upgrade_from_pilot` (BooleanField default False), `is_referral_order` (BooleanField default False), `referral_organisation` (CharField max_length=255, null=True, blank=True), `po_number` (CharField max_length=100), `number_of_scans` (PositiveIntegerField null=True, blank=True), `cost_per_scan` (DecimalField max_digits=10, decimal_places=2, null=True, blank=True), `additional_information` (TextField blank=True), `ip_address` (GenericIPAddressField null=True, blank=True), `form_entry_key` (CharField max_length=100, null=True, blank=True), `submitted_at` (DateTimeField auto_now_add=True), `hcaptcha_verified` (BooleanField default False), `tokens_used` (PositiveIntegerField default 0, frozen legacy counter — no longer written by ingestion; pre-existing values kept, new orders read `0`), and `total_agreed_price` as a `@property` returning `number_of_scans * cost_per_scan`, or `Decimal("0")` when either is None. No `total_agreed_price` database column SHALL exist. The Order admin SHALL show the live code count from a `_live_codes_count` row-count annotation (`Count("invitation_codes", distinct=True)`, readonly, sortable) instead of relying on `tokens_used`.
 
 #### Scenario: Total agreed price computed
 
@@ -87,10 +87,15 @@ The system SHALL provide on `Order`: `currency` (ForeignKey to `Currency`, on_de
 - **WHEN** an Order is created without specifying `tokens_used`
 - **THEN** `tokens_used` is `0`
 
-#### Scenario: tokens_used accumulates webhook-created codes
+#### Scenario: tokens_used frozen — ingestion does not increment
 
-- **WHEN** a webhook submission creates invitation codes for the order
-- **THEN** `tokens_used` increases by the number of codes created
+- **WHEN** a webhook submission with non-empty `code-N` values is ingested
+- **THEN** `tokens_used` is not incremented (new orders read `0`) and zero `InvitationCode` rows are created
+
+#### Scenario: Order admin shows live code count
+
+- **WHEN** a staff user views the Order changelist for an order with manually created invitation codes
+- **THEN** the live-count column shows the current number of linked `InvitationCode` rows (from the `_live_codes_count` row-count annotation, sortable, `0` for codeless orders), regardless of the frozen `tokens_used` value
 
 ### Requirement: OrderItem model
 
