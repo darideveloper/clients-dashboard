@@ -334,6 +334,9 @@ def ingest(mapping):
     rep = get_or_create_rep(
         _val(mapping, "reps-email"), _val(mapping, "reps-name")
     )
+    if org.assigned_rep_id is None:
+        org.assigned_rep = rep
+        org.save(update_fields=["assigned_rep"])
     primary_contact = get_or_create_contact(
         org,
         _val(mapping, "primary-contact-email"),

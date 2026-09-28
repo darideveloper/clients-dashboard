@@ -204,6 +204,33 @@ class MatchOrCreateTests(WebhookFixtures):
         again = get_or_create_contact(org, "JANE@example.com", "Janet", "555", primary)
         self.assertEqual(contact.pk, again.pk)
 
+    def test_ingest_assigns_rep_to_new_org(self):
+        status, order = ingest(self.mapping())
+        order.organization.refresh_from_db()
+        self.assertEqual(order.organization.assigned_rep, order.rep)
+
+    def test_repost_by_other_rep_does_not_overwrite(self):
+        status, order = ingest(self.mapping())
+        first_rep = order.rep
+        status, order = ingest(self.mapping({
+            "order-number": "OL-95",
+            "reps-email": "other@example.com",
+            "reps-name": "Other Rep",
+        }))
+        self.assertEqual(status, "updated")
+        self.assertEqual(order.rep.email, "other@example.com")
+        order.organization.refresh_from_db()
+        self.assertEqual(order.organization.assigned_rep, first_rep)
+
+    def test_preassigned_rep_untouched(self):
+        org = get_or_create_org("123 Main St")
+        keeper = get_or_create_rep("keeper@example.com", "Keeper Rep")
+        org.assigned_rep = keeper
+        org.save()
+        status, order = ingest(self.mapping())
+        order.organization.refresh_from_db()
+        self.assertEqual(order.organization.assigned_rep, keeper)
+
 
 class CountryTests(WebhookFixtures):
     def test_alias_resolves(self):

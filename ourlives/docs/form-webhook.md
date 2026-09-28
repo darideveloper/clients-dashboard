@@ -41,7 +41,7 @@ and test/dev submissions are processed; the value is recorded on the audit row.
 | Group | Keys |
 |---|---|
 | Order | `order-number`, `po-number`, `is-this-a-pilot-order`, `is-this-an-upgrade-from-a-pilot`, `is-this-an-order-following-a-referral`, `name-of-the-organsation-who-is-referring`, `currency` (non-pilot) / `pilot-currency` (pilot), `number-of-scans`, `cost-per-scan`, `please-add-an-additional-information-relating-to-this-order` |
-| Rep | `reps-name`, `reps-email` |
+| Rep | `reps-name`, `reps-email` (auto-assigned to the organization when it has none; a set rep is never overwritten) |
 | Address | `company-address-purchasing-ourlens-scans` (flattened `line1, line2, city, state, zip, country`) |
 | Contacts | primary block: `primary-contact`, `primary-contact-email`, `primary-contact-phone`; invoice block: `invoice-contact`, `invoice-email`, `invoice-contact-phone` |
 | Pilot product | region-block by pilot currency: `product-<region>`, `quantity-<region>`, `<region-price-field>` (us/Canada/uk/south-africa) |
